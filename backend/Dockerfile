@@ -2,22 +2,22 @@
 FROM maven:3.8.5-openjdk-17 AS build
 WORKDIR /app
 
-# Copy all backend files (pom.xml, src, etc.)
+# Copy all project files to the container
 COPY . .
 
-# Build the JAR file (Skipping tests to make it faster)
+# Build the JAR file (skipping tests to speed it up)
 RUN mvn clean package -DskipTests
 
 # --- Stage 2: Run the Application ---
 FROM openjdk:17.0.1-jdk-slim
 WORKDIR /app
 
-# Copy the built JAR file from Stage 1
-# WE USE *.jar SO IT WORKS NO MATTER WHAT YOUR FILE IS NAMED
+# Copy the built JAR file from the build stage
+# We use *.jar so it works regardless of your specific version number
 COPY --from=build /app/target/*.jar app.jar
 
-# Expose port 8080 (Spring Boot default)
+# Expose the port Spring Boot runs on
 EXPOSE 8080
 
-# Run the app
+# Command to start the application
 ENTRYPOINT ["java", "-jar", "app.jar"]

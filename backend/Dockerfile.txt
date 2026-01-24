@@ -1,0 +1,23 @@
+# --- Stage 1: Build the Application ---
+FROM maven:3.8.5-openjdk-17 AS build
+WORKDIR /app
+
+# Copy all backend files (pom.xml, src, etc.)
+COPY . .
+
+# Build the JAR file (Skipping tests to make it faster)
+RUN mvn clean package -DskipTests
+
+# --- Stage 2: Run the Application ---
+FROM openjdk:17.0.1-jdk-slim
+WORKDIR /app
+
+# Copy the built JAR file from Stage 1
+# WE USE *.jar SO IT WORKS NO MATTER WHAT YOUR FILE IS NAMED
+COPY --from=build /app/target/*.jar app.jar
+
+# Expose port 8080 (Spring Boot default)
+EXPOSE 8080
+
+# Run the app
+ENTRYPOINT ["java", "-jar", "app.jar"]

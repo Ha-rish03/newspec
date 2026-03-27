@@ -281,20 +281,36 @@ function AdminDashboard({ onLogout }) {
     setPreviewData([]); setMessage(""); 
   }, [dept, sem, activeTab, calcDept, calcSem, manualDept, manualSem]);
 
+  // FIX 1: Bulletproof subject fetching
   useEffect(() => {
     if (activeTab === "grid" && gridType === "internal") {
       fetch(`${API_BASE}/api/import/fetch-subjects?department=${dept}&semester=${sem}&paperType=${gridPaperType}`)
-        .then(res => res.json())
-        .then(data => { setGridSubjectList(data); if(data.length > 0) setGridSubject(data[0].subjectCode); else setGridSubject(""); })
-        .catch(err => console.warn("Failed to fetch subjects for grid"));
+        .then(res => {
+            if (!res.ok) throw new Error("Server Error");
+            return res.json();
+        })
+        .then(data => {
+            const arr = Array.isArray(data) ? data : [];
+            setGridSubjectList(arr); 
+            if(arr.length > 0) setGridSubject(arr[0].subjectCode); else setGridSubject(""); 
+        })
+        .catch(err => {
+            console.warn("Failed to fetch subjects for grid");
+            setGridSubjectList([]);
+            setGridSubject("");
+        });
     }
   }, [dept, sem, gridPaperType, activeTab, gridType]);
 
+  // FIX 2: Bulletproof paper fetching
   useEffect(() => {
     if (activeTab === "qpapers") {
       fetch(`${API_BASE}/api/import/question-papers`)
-        .then(res => res.json())
-        .then(data => setSavedPapers(data))
+        .then(res => {
+            if (!res.ok) throw new Error("Server Error");
+            return res.json();
+        })
+        .then(data => setSavedPapers(Array.isArray(data) ? data : []))
         .catch(() => setSavedPapers([]));
     }
   }, [activeTab]);
@@ -434,7 +450,6 @@ function AdminDashboard({ onLogout }) {
       });
   };
 
-  // ✅ NEW BULLETPROOF: IMAGE OCR FOR GRADES (Mobile Screenshots & Vertical Layouts)
   const handleManualSmartScanUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -462,7 +477,6 @@ function AdminDashboard({ onLogout }) {
       const lines = manualOcrText.split('\n');
       const finalPayload = [];
 
-      // Look for a global Register Number (Crucial for Mobile Screenshots)
       let globalRegNo = null;
       lines.forEach(line => {
           const rMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/i);
@@ -473,7 +487,6 @@ function AdminDashboard({ onLogout }) {
           const regMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/i);
           const subjMatch = line.match(/\b([A-Z]{2,3}\d{4,5})\b/i);
           
-          // Match Grades. (OCR often mistakes 'O' for '0' or 'Ο')
           const gradesRegex = /\b(O|0|Ο|A\+|A|B\+|B|C|U|RA|AB|SA|W|FAIL|PASS)\b/ig;
           let grades = [];
           let match;
@@ -482,10 +495,9 @@ function AdminDashboard({ onLogout }) {
           }
 
           if (grades.length > 0) {
-              const gradeVal = grades[grades.length - 1]; // The actual grade is usually the last matched token
+              const gradeVal = grades[grades.length - 1]; 
               const isFail = ["U", "RA", "AB", "FAIL", "F", "ABSENT", "WH", "W", "SA"].includes(gradeVal);
 
-              // Case 1: Vertical Layout (e.g., Mobile screenshot with global RegNo)
               if (subjMatch && globalRegNo) {
                   const subjCode = subjMatch[1].toUpperCase();
                   if (!finalPayload.some(p => p.registerNumber === globalRegNo && p.subjectCode === subjCode)) {
@@ -500,7 +512,6 @@ function AdminDashboard({ onLogout }) {
                       });
                   }
               }
-              // Case 2: Horizontal Layout (e.g., Standard list: RegNo ... Grade)
               else if (regMatch && manualOcrSubject) {
                   const regNo = regMatch[1].toUpperCase();
                   if (!finalPayload.some(p => p.registerNumber === regNo && p.subjectCode === manualOcrSubject)) {
@@ -526,7 +537,6 @@ function AdminDashboard({ onLogout }) {
       });
   };
 
-  // ✅ NEW BULLETPROOF: NATIVE PDF PARSER FOR ENTIRE SEMESTERS
   const handleManualPDFUpload = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -539,7 +549,6 @@ function AdminDashboard({ onLogout }) {
           const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
           let allLines = [];
 
-          // 1. Extract and perfectly align all text based on Y-coordinates
           for (let i = 1; i <= pdf.numPages; i++) {
               const page = await pdf.getPage(i);
               const content = await page.getTextContent();
@@ -547,7 +556,6 @@ function AdminDashboard({ onLogout }) {
               const itemsByY = {};
               content.items.forEach(item => {
                   const y = Math.round(item.transform[5]);
-                  // Group items within 5 pixels vertically onto the same line
                   let targetY = y;
                   for (let existingY in itemsByY) {
                       if (Math.abs(existingY - y) < 5) {
@@ -559,9 +567,9 @@ function AdminDashboard({ onLogout }) {
                   itemsByY[targetY].push(item);
               });
 
-              const yCoords = Object.keys(itemsByY).sort((a, b) => b - a); // Read Top to Bottom
+              const yCoords = Object.keys(itemsByY).sort((a, b) => b - a); 
               yCoords.forEach(y => {
-                  const lineItems = itemsByY[y].sort((a, b) => a.transform[4] - b.transform[4]); // Read Left to Right
+                  const lineItems = itemsByY[y].sort((a, b) => a.transform[4] - b.transform[4]); 
                   const lineText = lineItems.map(item => item.str.trim()).filter(str => str.length > 0).join(" ");
                   if (lineText) allLines.push(lineText);
               });
@@ -572,23 +580,17 @@ function AdminDashboard({ onLogout }) {
           const finalPayload = [];
           let currentSubjects = [];
 
-          // 2. Parse the aligned text
           allLines.forEach(line => {
-              // A. Look for the header row with multiple Subject Codes (e.g. CS3452, IT3401)
               const subjectMatches = line.match(/\b[A-Z]{2,3}\d{4,5}\b/g);
               if (subjectMatches && subjectMatches.length >= 2) {
                   currentSubjects = subjectMatches;
               }
 
-              // B. Look for a Register Number to identify a Student Row
               const regMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/);
               if (regMatch && currentSubjects.length > 0) {
                   const regNo = regMatch[1].toUpperCase();
-                  
-                  // Grab everything AFTER the Register Number to bypass the student's name
                   const afterRegNo = line.substring(line.indexOf(regNo) + regNo.length);
                   
-                  // Extract all grades from the remaining text (0/Ο mapped to 'O')
                   const gradeRegex = /\b(O|0|Ο|A\+|A|B\+|B|C|U|RA|AB|SA|W|WH\d*)\b/g;
                   const grades = [];
                   let gMatch;
@@ -596,7 +598,6 @@ function AdminDashboard({ onLogout }) {
                       grades.push(gMatch[1].toUpperCase().replace(/0|Ο/g, 'O'));
                   }
 
-                  // Slice from the end! This guarantees we ignore initials like "ABISHEK A"
                   const validGrades = grades.slice(-currentSubjects.length);
 
                   for(let i = 0; i < Math.min(validGrades.length, currentSubjects.length); i++) {
@@ -657,21 +658,22 @@ function AdminDashboard({ onLogout }) {
     });
   };
 
+  // FIX 3: Bulletproof Student fetching
   const fetchStudentsForGrid = async () => {
     if(!gridSubject.trim() && gridType === "external") { alert("Please enter the Subject Code."); return; }
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/import/logins`);
+      if (!res.ok) throw new Error("Server returned an error");
       const data = await res.json();
+      const validData = Array.isArray(data) ? data : [];
       
       const targetYear = Math.ceil(Number(sem) / 2);
-      const filtered = data.filter(u => {
+      const filtered = validData.filter(u => {
         const dbDept = String(u.department || "").trim().toUpperCase();
         const uiDept = String(dept).trim().toUpperCase();
         if (dbDept !== uiDept) return false;
-        
         if (Number(sem) === 99) return Number(u.semester) === 99;
-        
         const studentYear = Number(u.year) || Math.ceil(Number(u.semester) / 2);
         return studentYear === targetYear;
       });
@@ -696,7 +698,8 @@ function AdminDashboard({ onLogout }) {
       if(filtered.length === 0) setMessage(`⚠️ No students found in ${dept} Semester ${sem}.`);
       else setMessage(`✅ Loaded ${filtered.length} students. Ready for data entry.`);
     } catch (e) {
-      setMessage("❌ Error fetching students.");
+      setMessage("❌ Error fetching students. Ensure database has data.");
+      setGridData([]);
     }
     setLoading(false);
   };

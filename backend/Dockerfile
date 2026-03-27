@@ -1,23 +1,48 @@
-# --- Stage 1: Build the Application ---
-FROM maven:3.8.5-openjdk-17 AS build
-WORKDIR /app
+# ==========================================
+# STAGE 1: Build the React Frontend
+# ==========================================
+FROM node:18 AS frontend-build
+WORKDIR /app/frontend
 
-# Copy all project files to the container
-COPY . .
+# Copy frontend files and install dependencies
+COPY frontend/package*.json ./
+RUN npm install
 
-# Build the JAR file (skipping tests to speed it up)
+# Copy the rest of the frontend code and build it
+COPY frontend/ ./
+RUN npm run build
+
+# ==========================================
+# STAGE 2: Build the Spring Boot Backend
+# ==========================================
+FROM maven:3.8.5-openjdk-17 AS backend-build
+WORKDIR /app/backend
+
+# Copy backend source code
+COPY backend/ ./
+
+# THE MAGIC TRICK: Copy the compiled React app directly into Spring Boot's static folder
+COPY --from=frontend-build /app/frontend/dist/ ./src/main/resources/static/
+
+# Package the Java app (skipping tests for speed)
 RUN mvn clean package -DskipTests
 
-# --- Stage 2: Run the Application ---
+# ==========================================
+# STAGE 3: Run the Application (Render Optimized)
+# ==========================================
 FROM openjdk:17.0.1-jdk-slim
 WORKDIR /app
 
-# Copy the built JAR file from the build stage
-# We use *.jar so it works regardless of your specific version number
-COPY --from=build /app/target/*.jar app.jar
+# CRITICAL: Force Spring Boot to listen to Render's Port and public internet address
+ENV SERVER_PORT=${PORT:-8080}
+ENV SERVER_ADDRESS=0.0.0.0
 
-# Expose the port Spring Boot runs on
+# CRITICAL: Limit Java memory to 400MB so Render's 512MB Free Tier NEVER crashes again
+ENV JAVA_TOOL_OPTIONS="-Xmx400m -Xms256m"
+
+# Copy the final compiled JAR from Stage 2
+COPY --from=backend-build /app/backend/target/*.jar app.jar
+
 EXPOSE 8080
 
-# Command to start the application
 ENTRYPOINT ["java", "-jar", "app.jar"]

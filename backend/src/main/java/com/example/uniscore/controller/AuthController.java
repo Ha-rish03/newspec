@@ -1,9 +1,7 @@
 package com.example.uniscore.controller;
 
-import com.example.uniscore.entity.Result;
-import com.example.uniscore.entity.StudentUser;
-import com.example.uniscore.repo.ResultRepo;
-import com.example.uniscore.repo.StudentUserRepo;
+import com.example.uniscore.entity.*;
+import com.example.uniscore.repo.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,59 +11,83 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
-//@CrossOrigin(origins = {"http://localhost:5173", "http://127.0.0.1:5173"})
+@CrossOrigin
 public class AuthController {
 
-    private final StudentUserRepo studentUserRepo;
+    private final StudentRepo studentRepo;
+    private final FacultyRepo facultyRepo;
+    private final HodRepo hodRepo;
     private final ResultRepo resultRepo;
 
-    public AuthController(StudentUserRepo studentUserRepo, ResultRepo resultRepo) {
-        this.studentUserRepo = studentUserRepo;
+    public AuthController(StudentRepo studentRepo, FacultyRepo facultyRepo, HodRepo hodRepo, ResultRepo resultRepo) {
+        this.studentRepo = studentRepo;
+        this.facultyRepo = facultyRepo;
+        this.hodRepo = hodRepo;
         this.resultRepo = resultRepo;
     }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> body) {
-        // ✅ 1. Accept 'registerNumber' from Frontend
         String registerNumber = body.get("registerNumber");
-        
-        // Fallback for safety (if frontend sends old key)
-        if (registerNumber == null) {
-            registerNumber = body.get("rollNo");
-        }
-        
-        if (registerNumber == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Register Number is required"));
+        String password = body.get("password");
+        String role = body.get("role"); // React sends this! (student, faculty, hod, admin)
+
+        if (registerNumber == null || password == null || role == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Missing credentials"));
         }
 
         registerNumber = registerNumber.trim();
-        String password = body.get("password").trim();
+        password = password.trim();
 
-        // ✅ 2. Admin Login Check
-        if ("admin".equalsIgnoreCase(registerNumber) && "admin".equals(password)) {
-            Map<String, Object> adminResp = new HashMap<>();
-            adminResp.put("registerNumber", "admin"); // Consistent Key
-            adminResp.put("name", "Administrator");
-            adminResp.put("department", "All");
-            adminResp.put("role", "admin");
-            return ResponseEntity.ok(adminResp);
+        // 1. Admin Login
+        if ("admin".equalsIgnoreCase(role)) {
+            if ("admin".equalsIgnoreCase(registerNumber) && "admin".equals(password)) {
+                Map<String, Object> adminResp = new HashMap<>();
+                adminResp.put("registerNumber", "admin");
+                adminResp.put("name", "Administrator");
+                adminResp.put("department", "All");
+                adminResp.put("role", "admin");
+                return ResponseEntity.ok(adminResp);
+            }
+            return ResponseEntity.status(401).body(Map.of("error", "Invalid admin credentials"));
         }
 
-        // ✅ 3. DB Lookup using new method: findByRegisterNumber
-        StudentUser user = studentUserRepo.findByRegisterNumber(registerNumber);
-        
-        if (user == null || !user.getPassword().trim().equals(password)) {
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
+        String name = "";
+        String dept = "";
+
+        // 2. Check specific table based on the selected role
+        if ("student".equalsIgnoreCase(role)) {
+            Student s = studentRepo.findById(registerNumber).orElse(null);
+            if (s == null || !s.getPassword().trim().equals(password)) {
+                return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
+            }
+            name = s.getName();
+            dept = s.getDepartment();
+        } 
+        else if ("faculty".equalsIgnoreCase(role)) {
+            Faculty f = facultyRepo.findById(registerNumber).orElse(null);
+            if (f == null || !f.getPassword().trim().equals(password)) {
+                return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
+            }
+            name = f.getName();
+            dept = f.getDepartment();
+        } 
+        else if ("hod".equalsIgnoreCase(role)) {
+            Hod h = hodRepo.findById(registerNumber).orElse(null);
+            if (h == null || !h.getPassword().trim().equals(password)) {
+                return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
+            }
+            name = h.getName();
+            dept = h.getDepartment();
+        } else {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid role selected"));
         }
 
-        // Normalize role
-        String role = user.getRole().trim().toLowerCase();
-        
-        // ✅ 4. Construct Response with 'registerNumber'
+        // 3. Success Response
         Map<String, Object> resp = new HashMap<>();
-        resp.put("registerNumber", user.getRegisterNumber()); 
-        resp.put("name", user.getName());
-        resp.put("department", user.getDepartment());
+        resp.put("registerNumber", registerNumber); 
+        resp.put("name", name);
+        resp.put("department", dept);
         resp.put("role", role);
 
         return ResponseEntity.ok(resp);

@@ -8,7 +8,12 @@ import lombok.*;
 @Table(name = "subjects")
 public class Subject {
 
+    // ✅ ADDED: Auto-generating ID so the same subject code can exist multiple times
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id; 
+
+    // ✅ REMOVED @Id from here!
     @Column(name = "subject_code")
     private String subjectCode;
 

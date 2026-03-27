@@ -77,8 +77,8 @@ public class InternalUploadService {
         
         System.out.println("🎯 MODEL EXAM COLUMN INDEX: " + modelIdx);
 
-        // 3. 🧹 PROCESS
-        repository.deleteBySubjectCode(subject.getSubjectCode());
+        // 3. 🧹 PROCESS 
+        // ❌ The dangerous "deleteBySubjectCode" wipe command has been completely removed!
 
         List<InternalMarks> marksList = new ArrayList<>();
         int startDataRow = anchorRowIdx + 2; 
@@ -90,9 +90,15 @@ public class InternalUploadService {
             String regNo = getCellValue(row.getCell(regNoIdx));
             if (regNo.length() < 5 || cleanString(regNo).contains("sample")) continue;
 
-            InternalMarks marks = new InternalMarks();
-            marks.setRegisterNumber(regNo);
-            marks.setSubjectCode(subject.getSubjectCode());
+            // ✅ NEW SAFE LOGIC: Look up the student. If they exist, UPDATE. If not, CREATE.
+            // Uses .orElse(null) to handle the Optional wrapper from your Repository!
+            InternalMarks marks = repository.findByRegisterNumberAndSubjectCode(regNo, subject.getSubjectCode()).orElse(null);
+            
+            if (marks == null) {
+                marks = new InternalMarks();
+                marks.setRegisterNumber(regNo);
+                marks.setSubjectCode(subject.getSubjectCode());
+            }
 
             double theoryPart = 0.0;
             double practicalPart = 0.0;
@@ -207,11 +213,9 @@ public class InternalUploadService {
         } catch (Exception e) { return 0.0; }
     }
 
-    // ✅ FIXED: Reads numeric headers as "0.25" instead of "0"
     private String getCellValue(Cell cell) {
         if (cell == null) return "";
         if (cell.getCellType() == CellType.STRING) return cell.getStringCellValue().trim();
-        // REMOVED THE (long) CAST HERE
         if (cell.getCellType() == CellType.NUMERIC) return String.valueOf(cell.getNumericCellValue());
         return "";
     }

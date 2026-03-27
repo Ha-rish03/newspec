@@ -9,13 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "docx": "^9.6.1",
+    "file-saver": "^2.0.5",
+    "framer-motion": "^10.12.16",
+    "pdfjs-dist": "^5.5.207",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "framer-motion": "^10.12.16",
-    "xlsx": "0.18.6"
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "vite": "^5.0.0",
-    "@vitejs/plugin-react": "^3.2.0"
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.0"
   }
 }

@@ -5,15 +5,15 @@ import lombok.*;
 
 @Entity
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-@Table(name = "student_users")
-public class StudentUser {
+@Table(name = "hods")
+public class Hod {
 
     @Id
-    @Column(name = "register_number") // ✅ MATCHES DB
-    private String registerNumber;    // ✅ RENAMED FROM rollNo
+    @Column(name = "register_number")
+    private String registerNumber; // Using this as the HOD ID
 
     private String name;
     private String password;
     private String department;
-    private String role;
+    private String role = "hod";
 }

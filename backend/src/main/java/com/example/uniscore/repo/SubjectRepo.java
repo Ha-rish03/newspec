@@ -2,15 +2,13 @@ package com.example.uniscore.repo;
 
 import com.example.uniscore.entity.Subject;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
 import java.util.List;
 
-@Repository
-public interface SubjectRepo extends JpaRepository<Subject, String> {
-
-    // ✅ FIXED: This method name matches the ImportController exactly.
-    // Spring Boot automatically creates the query based on the name.
-    List<Subject> findByDepartmentAndSemesterAndPaperType(String department, Integer semester, String paperType);
-
+// ✅ Note the <Subject, Long> here
+public interface SubjectRepo extends JpaRepository<Subject, Long> {
+    
+    List<Subject> findByDepartmentAndSemesterAndPaperType(String department, int semester, String paperType);
+    
+    // ✅ Custom query to fetch a specific subject for a specific department safely
+    Subject findBySubjectCodeAndDepartment(String subjectCode, String department);
 }

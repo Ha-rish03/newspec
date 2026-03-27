@@ -8,7 +8,8 @@ import * as pdfjsLib from "pdfjs-dist/build/pdf";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080";
+// Automatically uses the current domain, but falls back to localhost for local testing
+const API_BASE = import.meta.env.PROD ? "" : "http://localhost:8080";
 
 /* -------------------- Utilities -------------------- */
 function normalizeRowKeys(row) {

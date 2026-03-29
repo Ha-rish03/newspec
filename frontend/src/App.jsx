@@ -195,17 +195,26 @@ function ThemedLogin({ onLogin }) {
   const [password, setPassword] = useState("");
 
   const handleLogin = async () => {
-    const payload = { registerNumber: tab === "admin" ? "admin" : regNo, password, role: tab };
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Login failed");
-      onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || payload.registerNumber, department: data.department || "Unknown" });
-    } catch { alert("Invalid credentials"); }
-  };
+    // --- NEW DATE FLIP LOGIC ---
+    let finalPassword = password;
+    
+    // If it's a student and they selected a date from the calendar
+    if (tab === "student" && password.includes("-")) {
+      const [year, month, day] = password.split("-"); // Browser outputs YYYY-MM-DD
+      finalPassword = `${day}-${month}-${year}`;      // Flip it to DD-MM-YYYY
+    }
+    // ---------------------------
 
+ const payload = { registerNumber: tab === "admin" ? "admin" : regNo, password: finalPassword, role: tab };
+try {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+ });
+const data = await res.json();
+ if (!res.ok) throw new Error(data.error || "Login failed");
+ onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || payload.registerNumber, department: data.department || "Unknown" });
+} catch { alert("Invalid credentials"); }
+ };
   return (
     <div className="min-h-screen flex items-center justify-center bg-cover bg-center relative" style={{ backgroundImage: "url('/college-bg.jpg')" }}>
       <div className="absolute inset-0 bg-black/40" />

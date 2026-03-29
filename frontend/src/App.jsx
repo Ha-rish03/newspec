@@ -194,27 +194,35 @@ function ThemedLogin({ onLogin }) {
   const [regNo, setRegNo] = useState(""); 
   const [password, setPassword] = useState("");
 
-  const handleLogin = async () => {
-    // --- NEW DATE FLIP LOGIC ---
-    let finalPassword = password;
+  const handleLogin = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     
-    // If it's a student and they selected a date from the calendar
-    if (tab === "student" && password.includes("-")) {
-      const [year, month, day] = password.split("-"); // Browser outputs YYYY-MM-DD
-      finalPassword = `${day}-${month}-${year}`;      // Flip it to DD-MM-YYYY
+    let finalPassword = password.trim();
+    
+    // HTML Calendar always outputs YYYY-MM-DD. We MUST flip it to match our DD-MM-YYYY database!
+    if (tab === "student" && finalPassword.includes("-")) {
+      const parts = finalPassword.split("-");
+      if (parts[0].length === 4) { // Checks if it starts with the 4-digit year
+        finalPassword = `${parts[2]}-${parts[1]}-${parts[0]}`; // Converts to DD-MM-YYYY
+      }
     }
-    // ---------------------------
 
- const payload = { registerNumber: tab === "admin" ? "admin" : regNo, password: finalPassword, role: tab };
-try {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
- });
-const data = await res.json();
- if (!res.ok) throw new Error(data.error || "Login failed");
- onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || payload.registerNumber, department: data.department || "Unknown" });
-} catch { alert("Invalid credentials"); }
- };
+    const payload = { 
+      registerNumber: tab === "admin" ? "admin" : regNo.trim(), 
+      password: finalPassword, 
+      role: tab 
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Login failed");
+      onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || payload.registerNumber, department: data.department || "Unknown" });
+    } catch { alert("Invalid credentials"); }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-cover bg-center relative" style={{ backgroundImage: "url('/college-bg.jpg')" }}>
       <div className="absolute inset-0 bg-black/40" />
@@ -352,17 +360,26 @@ function AdminDashboard({ onLogout }) {
                   break;
               }
           }
+          
           let formattedPassword = rawPassword;
+          // --- STRICT DD-MM-YYYY DATABASE LOGIC ---
           if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(rawPassword)) {
+              // If Excel gives DD-MM-YYYY, keep it and ensure 0-padding
               const parts = rawPassword.split(/[\/\-]/);
-              formattedPassword = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+              formattedPassword = `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
           } else if (/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(rawPassword)) {
+              // If Excel is YYYY-MM-DD, flip it to DD-MM-YYYY
               const parts = rawPassword.split(/[\/\-]/);
-              formattedPassword = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+              formattedPassword = `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
           } else if (!isNaN(rawPassword) && Number(rawPassword) > 20000) {
+              // If Excel sends a weird number, convert directly to DD-MM-YYYY
               const dateObj = new Date((Number(rawPassword) - 25569) * 86400 * 1000);
-              formattedPassword = dateObj.toISOString().split('T')[0];
+              const y = dateObj.getFullYear();
+              const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+              const d = String(dateObj.getDate()).padStart(2, '0');
+              formattedPassword = `${d}-${m}-${y}`; 
           }
+          // ------------------------------------------
 
           return { 
             registerNumber: n.registerNumber, 

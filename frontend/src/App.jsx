@@ -48,8 +48,90 @@ function mergeResults(rows) {
   return Object.values(map);
 }
 
-/* -------------------- SHARED DOCX GENERATORS -------------------- */
+/* -------------------- SHARED GPA CALCULATOR COMPONENT -------------------- */
+function GPACalculator() {
+  const [rows, setRows] = useState([{ id: 1, subject: "", grade: "O", credits: 3 }]);
+  const [gpa, setGpa] = useState(null);
 
+  const gradePoints = { "O": 10, "A+": 9, "A": 8, "B+": 7, "B": 6, "C": 5, "U": 0, "RA": 0, "AB": 0, "SA": 0, "W": 0 };
+
+  const addRow = () => setRows([...rows, { id: Date.now(), subject: "", grade: "O", credits: 3 }]);
+  const removeRow = (id) => setRows(rows.filter(r => r.id !== id));
+  
+  const updateRow = (id, field, val) => {
+    setRows(rows.map(r => r.id === id ? { ...r, [field]: val } : r));
+  };
+
+  const calculateGPA = () => {
+    let totalPoints = 0;
+    let totalCredits = 0;
+    rows.forEach(r => {
+      const cr = Number(r.credits) || 0;
+      const pts = gradePoints[r.grade.toUpperCase()] || 0;
+      totalPoints += (pts * cr);
+      totalCredits += cr;
+    });
+    setGpa(totalCredits > 0 ? (totalPoints / totalCredits).toFixed(3) : "0.000");
+  };
+
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
+      <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <div>
+          <h2 className="text-xl font-bold text-indigo-800">🎓 GPA / CGPA Calculator</h2>
+          <p className="text-sm text-gray-500">Calculate your exact grade point average.</p>
+        </div>
+        {gpa !== null && (
+          <div className="bg-indigo-600 text-white px-6 py-2 rounded-lg shadow-md text-center">
+            <div className="text-xs uppercase tracking-wider font-bold opacity-80">Calculated GPA</div>
+            <div className="text-2xl font-black">{gpa}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3 mb-6">
+        <div className="grid grid-cols-12 gap-3 px-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
+          <div className="col-span-5">Subject (Optional)</div>
+          <div className="col-span-3">Grade</div>
+          <div className="col-span-3">Credits</div>
+          <div className="col-span-1 text-center">Action</div>
+        </div>
+
+        <AnimatePresence>
+          {rows.map((row) => (
+            <motion.div key={row.id} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }} className="grid grid-cols-12 gap-3 items-center bg-gray-50 p-2 rounded-lg border border-gray-200">
+              <div className="col-span-5">
+                <input type="text" placeholder="e.g. CS3452" value={row.subject} onChange={(e) => updateRow(row.id, "subject", e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-bold text-gray-700" />
+              </div>
+              <div className="col-span-3">
+                <select value={row.grade} onChange={(e) => updateRow(row.id, "grade", e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-bold text-indigo-700 bg-white">
+                  {Object.keys(gradePoints).map(g => <option key={g} value={g}>{g} ({gradePoints[g]} pts)</option>)}
+                </select>
+              </div>
+              <div className="col-span-3">
+                <input type="number" min="1" max="10" value={row.credits} onChange={(e) => updateRow(row.id, "credits", e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-bold text-center" />
+              </div>
+              <div className="col-span-1 text-center">
+                <button onClick={() => removeRow(row.id)} className="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 p-2 rounded transition-colors" title="Remove row">✖</button>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      <div className="flex gap-4">
+        <button onClick={addRow} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-lg border border-gray-300 transition-colors">
+          + Add Subject
+        </button>
+        <button onClick={calculateGPA} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md transition-transform active:scale-95">
+          🧮 Calculate GPA
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------- SHARED DOCX GENERATORS -------------------- */
 const exportSemesterPaperDocx = async (config, templateType) => {
   const { header, partA, partB, partC, customContent } = config;
   try {
@@ -197,19 +279,11 @@ function ThemedLogin({ onLogin }) {
   const handleLogin = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     
-    let finalPassword = password.trim();
-    
-    // HTML Calendar always outputs YYYY-MM-DD. We MUST flip it to match our DD-MM-YYYY database!
-    if (tab === "student" && finalPassword.includes("-")) {
-      const parts = finalPassword.split("-");
-      if (parts[0].length === 4) { // Checks if it starts with the 4-digit year
-        finalPassword = `${parts[2]}-${parts[1]}-${parts[0]}`; // Converts to DD-MM-YYYY
-      }
-    }
-
+    // NUCLEAR OPTION: No auto-formatting. No calendar overrides.
+    // Send exactly what the user typed in the text box.
     const payload = { 
       registerNumber: tab === "admin" ? "admin" : regNo.trim(), 
-      password: finalPassword, 
+      password: password.trim(), 
       role: tab 
     };
 
@@ -220,7 +294,7 @@ function ThemedLogin({ onLogin }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
       onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || payload.registerNumber, department: data.department || "Unknown" });
-    } catch { alert("Invalid credentials"); }
+    } catch { alert("Invalid credentials. Please verify your details exactly as shown in the database."); }
   };
 
   return (
@@ -237,10 +311,17 @@ function ThemedLogin({ onLogin }) {
           <div className="space-y-4">
             <input value={tab === "admin" ? "admin" : regNo} onChange={(e) => setRegNo(e.target.value)} disabled={tab === "admin"} placeholder={tab === "admin" ? "admin" : "Register Number / ID"} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
             
+            {/* NUCLEAR OPTION FOR DOB: Changed type="date" to type="text" */}
             {tab === "student" ? (
               <div className="relative mt-2">
-                <label className="text-[10px] font-bold text-gray-500 absolute -top-2 left-3 bg-white px-1 uppercase tracking-wider">Date of Birth (Password)</label>
-                <input type="date" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-gray-700" />
+                <label className="text-[10px] font-bold text-gray-500 absolute -top-2 left-3 bg-white px-1 uppercase tracking-wider">Date of Birth (DD-MM-YYYY)</label>
+                <input 
+                  type="text" 
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)} 
+                  placeholder="e.g. 19-03-2005"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-gray-700 font-mono tracking-wide" 
+                />
               </div>
             ) : (
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
@@ -853,10 +934,22 @@ function AdminDashboard({ onLogout }) {
           <button onClick={() => setActiveTab("manual")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "manual" ? "border-b-2 border-orange-500 text-orange-600" : "text-gray-500 hover:text-orange-600"}`}>5. Final Override</button>
           <button onClick={() => setActiveTab("manage")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "manage" ? "border-b-2 border-red-600 text-red-600" : "text-gray-500 hover:text-red-600"}`}>6. Manage Live</button>
           <button onClick={() => setActiveTab("qpapers")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "qpapers" ? "border-b-2 border-purple-600 text-purple-700" : "text-gray-500 hover:text-purple-700"}`}>7. Question Papers</button>
+          
+          {/* NEW GPA TAB */}
+          <button onClick={() => setActiveTab("gpa")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "gpa" ? "border-b-2 border-indigo-600 text-indigo-700" : "text-gray-500 hover:text-indigo-700"}`}>8. GPA Calc</button>
         </div>
 
         <AnimatePresence>{message && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`p-4 rounded-md mb-6 text-sm font-medium shadow-sm ${message.startsWith("✅") || message.startsWith("🎉") ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>{message}</motion.div>}</AnimatePresence>
         
+        {/* NEW GPA VIEW */}
+        {activeTab === "gpa" && (
+           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <div className="max-w-4xl mx-auto">
+                 <GPACalculator />
+              </div>
+           </motion.div>
+        )}
+
         {activeTab === "setup" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6"> 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex gap-4 items-end">
@@ -1522,6 +1615,7 @@ function FacultyDashboard({ user, onLogout }) {
 function StudentResultPage({ user, onLogout }) {
   const [profile, setProfile] = useState(null);
   const [selectedSem, setSelectedSem] = useState(null); 
+  const [showCalculator, setShowCalculator] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -1546,13 +1640,24 @@ function StudentResultPage({ user, onLogout }) {
       <div className="max-w-5xl mx-auto bg-white rounded-xl shadow-lg p-8 border border-gray-100 print:shadow-none print:border-none print:m-0 print:max-w-full">
         
         {/* Header Section */}
-        <div className="flex items-center mb-6 border-b border-gray-200 pb-4">
-          <img src="/college-logo.jpg" alt="Logo" className="w-16 h-16 object-contain mr-4 rounded-full border print:border-none" />
-          <div>
-            <h1 className="text-2xl font-bold text-green-800">St. Peters College of Engineering and Technology</h1>
-            <p className="text-green-600 font-medium text-sm">Student Result Portal</p>
+        <div className="flex items-center justify-between mb-6 border-b border-gray-200 pb-4">
+          <div className="flex items-center">
+            <img src="/college-logo.jpg" alt="Logo" className="w-16 h-16 object-contain mr-4 rounded-full border print:border-none" />
+            <div>
+              <h1 className="text-2xl font-bold text-green-800">St. Peters College of Engineering and Technology</h1>
+              <p className="text-green-600 font-medium text-sm">Student Result Portal</p>
+            </div>
           </div>
+          <button onClick={() => setShowCalculator(!showCalculator)} className="hidden md:flex px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg font-bold border border-indigo-200 hover:bg-indigo-100 transition-colors print:hidden">
+            {showCalculator ? "Hide Calculator" : "🧮 Open GPA Calculator"}
+          </button>
         </div>
+
+        {showCalculator && (
+          <div className="mb-8 print:hidden">
+            <GPACalculator />
+          </div>
+        )}
 
         {/* Profile Details Box */}
         <div className="bg-[#b3e6e6] border border-teal-200 rounded-lg p-6 mb-8 print:bg-white print:border-none print:p-0 print:mb-4">

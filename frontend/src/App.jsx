@@ -1701,8 +1701,18 @@ function StudentResultPage({ user, onLogout }) {
             <div className="flex items-center">
               <span className="w-48 font-bold">Branch</span>
               <span className="uppercase text-[15px]">
-                {profile?.student?.department === "IT" ? "205-B.Tech. Information Technology" : 
-                 profile?.student?.department === "CSE" ? "104-B.E. Computer Science and Engineering" : 
+                { profile?.student?.department === "CSE" ? "104-B.E. Computer Science and Engineering" :
+  profile?.student?.department === "ECE" ? "106-B.E. Electronics and Communication Engineering" :
+  profile?.student?.department === "EEE" ? "105-B.E. Electrical and Electronics Engineering" :
+  profile?.student?.department === "BIO TECH" ? "214-B.Tech. Biotechnology" :
+  profile?.student?.department === "MECH" ? "114-B.E. Mechanical Engineering" :
+  profile?.student?.department === "AIDS" ? "149-B.Tech. Artificial Intelligence and Data Science" :
+  profile?.student?.department === "AERO" ? "101-B.E. Aeronautical Engineering" :
+  profile?.student?.department === "CIVIL" ? "103-B.E. Civil Engineering" :
+  profile?.student?.department === "CHEM" ? "203-B.Tech. Chemical Engineering" :
+  profile?.student?.department === "CSBS" ? "148-B.E. Computer Science and Business Systems" :
+  profile?.student?.department === "BIO MEDICINE" ? "121-B.E. Biomedical Engineering" :
+
                  user.department}
               </span>
             </div>

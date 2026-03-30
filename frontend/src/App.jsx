@@ -279,11 +279,21 @@ function ThemedLogin({ onLogin }) {
   const handleLogin = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     
-    // NUCLEAR OPTION: No auto-formatting. No calendar overrides.
-    // Send exactly what the user typed in the text box.
+    let finalPassword = password.trim();
+    
+    // THE TRANSLATOR:
+    // The HTML calendar picker ALWAYS gives us YYYY-MM-DD natively.
+    // We instantly translate it here to DD-MM-YYYY to exactly match your database!
+    if (tab === "student" && finalPassword.includes("-")) {
+      const parts = finalPassword.split("-");
+      if (parts[0].length === 4) { // Checks if the year is at the front
+        finalPassword = `${parts[2]}-${parts[1]}-${parts[0]}`; // Flips to DD-MM-YYYY
+      }
+    }
+
     const payload = { 
       registerNumber: tab === "admin" ? "admin" : regNo.trim(), 
-      password: password.trim(), 
+      password: finalPassword, 
       role: tab 
     };
 
@@ -294,7 +304,7 @@ function ThemedLogin({ onLogin }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
       onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || payload.registerNumber, department: data.department || "Unknown" });
-    } catch { alert("Invalid credentials. Please verify your details exactly as shown in the database."); }
+    } catch { alert("Invalid credentials. Please check your Register Number and DOB."); }
   };
 
   return (
@@ -311,16 +321,15 @@ function ThemedLogin({ onLogin }) {
           <div className="space-y-4">
             <input value={tab === "admin" ? "admin" : regNo} onChange={(e) => setRegNo(e.target.value)} disabled={tab === "admin"} placeholder={tab === "admin" ? "admin" : "Register Number / ID"} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
             
-            {/* NUCLEAR OPTION FOR DOB: Changed type="date" to type="text" */}
             {tab === "student" ? (
               <div className="relative mt-2">
-                <label className="text-[10px] font-bold text-gray-500 absolute -top-2 left-3 bg-white px-1 uppercase tracking-wider">Date of Birth (DD-MM-YYYY)</label>
+                <label className="text-[10px] font-bold text-gray-500 absolute -top-2 left-3 bg-white px-1 uppercase tracking-wider">Date of Birth</label>
+                {/* CALENDAR IS BACK! type="date" */}
                 <input 
-                  type="text" 
+                  type="date" 
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)} 
-                  placeholder="e.g. 19-03-2005"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-gray-700 font-mono tracking-wide" 
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-gray-700" 
                 />
               </div>
             ) : (

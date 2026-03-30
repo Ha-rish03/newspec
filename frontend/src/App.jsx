@@ -279,32 +279,39 @@ function ThemedLogin({ onLogin }) {
   const handleLogin = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     
-    let finalPassword = password.trim();
-    
-    // THE TRANSLATOR:
-    // The HTML calendar picker ALWAYS gives us YYYY-MM-DD natively.
-    // We instantly translate it here to DD-MM-YYYY to exactly match your database!
-    if (tab === "student" && finalPassword.includes("-")) {
-      const parts = finalPassword.split("-");
-      if (parts[0].length === 4) { // Checks if the year is at the front
-        finalPassword = `${parts[2]}-${parts[1]}-${parts[0]}`; // Flips to DD-MM-YYYY
+    let pass1 = password.trim();
+    let pass2 = password.trim();
+
+    // SMART LOGIN BYPASS: React will test BOTH date formats!
+    if (tab === "student" && pass1.includes("-")) {
+      const parts = pass1.split("-");
+      if (parts[0].length === 4) { 
+        pass2 = `${parts[2]}-${parts[1]}-${parts[0]}`; // Creates DD-MM-YYYY
+      } else if (parts[2].length === 4) {
+        pass2 = `${parts[2]}-${parts[1]}-${parts[0]}`; // Creates YYYY-MM-DD
       }
     }
 
-    const payload = { 
-      registerNumber: tab === "admin" ? "admin" : regNo.trim(), 
-      password: finalPassword, 
-      role: tab 
-    };
-
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      // Try Format 1 first
+      let res = await fetch(`${API_BASE}/api/auth/login`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ registerNumber: tab === "admin" ? "admin" : regNo.trim(), password: pass1, role: tab }),
       });
+      
+      // If it fails, instantly try Format 2
+      if (!res.ok && pass1 !== pass2) {
+        res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ registerNumber: tab === "admin" ? "admin" : regNo.trim(), password: pass2, role: tab }),
+        });
+      }
+
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
-      onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || payload.registerNumber, department: data.department || "Unknown" });
-    } catch { alert("Invalid credentials. Please check your Register Number and DOB."); }
+      
+      onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || (tab === "admin" ? "admin" : regNo.trim()), department: data.department || "Unknown" });
+    } catch { 
+      alert("Invalid credentials. Please verify your Register Number and DOB."); 
+    }
   };
 
   return (

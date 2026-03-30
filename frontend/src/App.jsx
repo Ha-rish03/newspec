@@ -271,6 +271,7 @@ const exportUnitTestPaperDocx = async (config) => {
 };
 
 /* -------------------- Login -------------------- */
+/* -------------------- Login -------------------- */
 function ThemedLogin({ onLogin }) {
   const [tab, setTab] = useState("student");
   const [regNo, setRegNo] = useState(""); 
@@ -279,34 +280,41 @@ function ThemedLogin({ onLogin }) {
   const handleLogin = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     
-    let pass1 = password.trim();
-    let pass2 = password.trim();
+    let pass1 = password.trim(); 
+    let pass2 = password.trim(); 
+    let pass3 = password.trim(); 
 
-    // SMART LOGIN BYPASS: React will test BOTH date formats!
+    // THE GOD MODE BYPASS: The Calendar outputs YYYY-MM-DD.
+    // We will instantly generate all 3 possible database formats and test them!
     if (tab === "student" && pass1.includes("-")) {
       const parts = pass1.split("-");
-      if (parts[0].length === 4) { 
-        pass2 = `${parts[2]}-${parts[1]}-${parts[0]}`; // Creates DD-MM-YYYY
-      } else if (parts[2].length === 4) {
-        pass2 = `${parts[2]}-${parts[1]}-${parts[0]}`; // Creates YYYY-MM-DD
+      if (parts[0].length === 4) { // Format is YYYY-MM-DD
+        pass2 = `${parts[2]}-${parts[1]}-${parts[0]}`; // 1. Indian Format (DD-MM-YYYY)
+        pass3 = `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0].substring(2)}`; // 2. The Weird Excel Format (M/D/YY)
       }
     }
 
     try {
-      // Try Format 1 first
-      let res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ registerNumber: tab === "admin" ? "admin" : regNo.trim(), password: pass1, role: tab }),
-      });
-      
-      // If it fails, instantly try Format 2
-      if (!res.ok && pass1 !== pass2) {
+      // Put all possible passwords into a list
+      const passwordsToTry = tab === "student" ? [pass1, pass2, pass3] : [pass1];
+      let res = null;
+      let data = null;
+
+      // Rapid-fire test them against the Java backend
+      for (let p of passwordsToTry) {
         res = await fetch(`${API_BASE}/api/auth/login`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ registerNumber: tab === "admin" ? "admin" : regNo.trim(), password: pass2, role: tab }),
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ registerNumber: tab === "admin" ? "admin" : regNo.trim(), password: p, role: tab }),
         });
+        
+        if (res.ok) {
+           data = await res.json();
+           break; // SUCCESS! We found the right format, stop testing!
+        }
       }
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Login failed");
+      if (!res || !res.ok) {
+         throw new Error("Login failed");
+      }
       
       onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || (tab === "admin" ? "admin" : regNo.trim()), department: data.department || "Unknown" });
     } catch { 
@@ -331,7 +339,6 @@ function ThemedLogin({ onLogin }) {
             {tab === "student" ? (
               <div className="relative mt-2">
                 <label className="text-[10px] font-bold text-gray-500 absolute -top-2 left-3 bg-white px-1 uppercase tracking-wider">Date of Birth</label>
-                {/* CALENDAR IS BACK! type="date" */}
                 <input 
                   type="date" 
                   value={password} 

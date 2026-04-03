@@ -5,6 +5,7 @@ import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, Width
 import { saveAs } from "file-saver";
 import Tesseract from "tesseract.js";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
+import mammoth from "mammoth"; // NEW: For reading Word Documents!
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
 
@@ -33,7 +34,7 @@ function readFirstSheet(file, onJSON) {
     const data = new Uint8Array(evt.target.result);
     const wb = XLSX.read(data, { type: "array", cellDates: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const json = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false, dateNF: "yyyy-mm-dd" });
+    const json = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false, dateNF: "dd-mm-yyyy" });
     onJSON(Array.isArray(json) ? json : []);
   };
   reader.readAsArrayBuffer(file);
@@ -48,24 +49,20 @@ function mergeResults(rows) {
   return Object.values(map);
 }
 
-/* -------------------- SHARED GPA/CGPA CALCULATOR COMPONENT -------------------- */
+/* -------------------- SHARED GPA CALCULATOR COMPONENT -------------------- */
 function GPACalculator() {
   const [mode, setMode] = useState("GPA"); // Toggle between GPA and CGPA
-
   const gradePoints = { "O": 10, "A+": 9, "A": 8, "B+": 7, "B": 6, "C": 5, "U": 0, "RA": 0, "AB": 0, "SA": 0, "W": 0 };
 
-  // --- GPA STATE ---
   const [gpaRows, setGpaRows] = useState([{ id: 1, subject: "", grade: "O", credits: 3 }]);
   const [gpaResult, setGpaResult] = useState(null);
 
-  // --- CGPA STATE ---
   const [semesters, setSemesters] = useState([
     { id: 1, name: "Semester 1", rows: [{ id: 101, subject: "", grade: "O", credits: 3 }] }
   ]);
   const [cgpaResult, setCgpaResult] = useState(null);
-  const [openSem, setOpenSem] = useState(1); // Tracks which dropdown is open
+  const [openSem, setOpenSem] = useState(1);
 
-  // --- GPA Logic ---
   const addGpaRow = () => setGpaRows([...gpaRows, { id: Date.now(), subject: "", grade: "O", credits: 3 }]);
   const removeGpaRow = (id) => setGpaRows(gpaRows.filter(r => r.id !== id));
   const updateGpaRow = (id, field, val) => setGpaRows(gpaRows.map(r => r.id === id ? { ...r, [field]: val } : r));
@@ -80,23 +77,15 @@ function GPACalculator() {
     setGpaResult(totalCredits > 0 ? (totalPoints / totalCredits).toFixed(3) : "0.000");
   };
 
-  // --- CGPA Logic ---
   const addSemester = () => {
     const newId = Date.now();
     setSemesters([...semesters, { id: newId, name: `Semester ${semesters.length + 1}`, rows: [{ id: Date.now() + 1, subject: "", grade: "O", credits: 3 }] }]);
     setOpenSem(newId);
   };
   const removeSemester = (id) => setSemesters(semesters.filter(s => s.id !== id));
-  
-  const addCgpaRow = (semId) => {
-    setSemesters(semesters.map(s => s.id === semId ? { ...s, rows: [...s.rows, { id: Date.now(), subject: "", grade: "O", credits: 3 }] } : s));
-  };
-  const removeCgpaRow = (semId, rowId) => {
-    setSemesters(semesters.map(s => s.id === semId ? { ...s, rows: s.rows.filter(r => r.id !== rowId) } : s));
-  };
-  const updateCgpaRow = (semId, rowId, field, val) => {
-    setSemesters(semesters.map(s => s.id === semId ? { ...s, rows: s.rows.map(r => r.id === rowId ? { ...r, [field]: val } : r) } : s));
-  };
+  const addCgpaRow = (semId) => setSemesters(semesters.map(s => s.id === semId ? { ...s, rows: [...s.rows, { id: Date.now(), subject: "", grade: "O", credits: 3 }] } : s));
+  const removeCgpaRow = (semId, rowId) => setSemesters(semesters.map(s => s.id === semId ? { ...s, rows: s.rows.filter(r => r.id !== rowId) } : s));
+  const updateCgpaRow = (semId, rowId, field, val) => setSemesters(semesters.map(s => s.id === semId ? { ...s, rows: s.rows.map(r => r.id === rowId ? { ...r, [field]: val } : r) } : s));
 
   const calculateCGPA = () => {
     let totalPoints = 0; let totalCredits = 0;
@@ -110,7 +99,6 @@ function GPACalculator() {
     setCgpaResult(totalCredits > 0 ? (totalPoints / totalCredits).toFixed(3) : "0.000");
   };
 
-  // Shared Row Render UI
   const renderRow = (row, onUpdate, onRemove) => (
     <motion.div key={row.id} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }} className="grid grid-cols-12 gap-3 items-center bg-white p-2 rounded-lg border border-gray-200 shadow-sm mb-2">
       <div className="col-span-5"><input type="text" placeholder="Subject..." value={row.subject} onChange={(e) => onUpdate(row.id, "subject", e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-bold text-gray-700" /></div>
@@ -122,7 +110,6 @@ function GPACalculator() {
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
-      {/* Header & Toggle */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4 gap-4">
         <div>
           <h2 className="text-xl font-bold text-indigo-800">🎓 Academic Calculator</h2>
@@ -131,7 +118,6 @@ function GPACalculator() {
             <button onClick={() => setMode("CGPA")} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${mode === "CGPA" ? "bg-white text-indigo-700 shadow-sm" : "text-indigo-400 hover:text-indigo-600"}`}>CGPA (All Semesters)</button>
           </div>
         </div>
-
         {(mode === "GPA" ? gpaResult : cgpaResult) !== null && (
           <div className="bg-indigo-600 text-white px-6 py-2 rounded-lg shadow-md text-center min-w-[120px]">
             <div className="text-xs uppercase tracking-wider font-bold opacity-80">Calculated {mode}</div>
@@ -144,7 +130,6 @@ function GPACalculator() {
         <div className="col-span-5">Subject</div><div className="col-span-3">Grade</div><div className="col-span-3">Credits</div><div className="col-span-1 text-center">Del</div>
       </div>
 
-      {/* GPA MODE UI */}
       {mode === "GPA" && (
         <div className="space-y-2 mb-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
           <AnimatePresence>{gpaRows.map(row => renderRow(row, updateGpaRow, removeGpaRow))}</AnimatePresence>
@@ -152,7 +137,6 @@ function GPACalculator() {
         </div>
       )}
 
-      {/* CGPA MODE UI */}
       {mode === "CGPA" && (
         <div className="space-y-4 mb-6">
           {semesters.map((sem, index) => (
@@ -181,7 +165,6 @@ function GPACalculator() {
         </div>
       )}
 
-      {/* Action Button */}
       <button onClick={mode === "GPA" ? calculateGPA : calculateCGPA} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-lg shadow-md transition-transform active:scale-95 text-lg flex justify-center items-center gap-2">
         🧮 Calculate Final {mode}
       </button>
@@ -341,23 +324,19 @@ function ThemedLogin({ onLogin }) {
     let pass2 = password.trim(); 
     let pass3 = password.trim(); 
 
-    // THE GOD MODE BYPASS: The Calendar outputs YYYY-MM-DD.
-    // We will instantly generate all 3 possible database formats and test them!
     if (tab === "student" && pass1.includes("-")) {
       const parts = pass1.split("-");
-      if (parts[0].length === 4) { // Format is YYYY-MM-DD
-        pass2 = `${parts[2]}-${parts[1]}-${parts[0]}`; // 1. Indian Format (DD-MM-YYYY)
-        pass3 = `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0].substring(2)}`; // 2. The Weird Excel Format (M/D/YY)
+      if (parts[0].length === 4) { 
+        pass2 = `${parts[2]}-${parts[1]}-${parts[0]}`; 
+        pass3 = `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0].substring(2)}`; 
       }
     }
 
     try {
-      // Put all possible passwords into a list
       const passwordsToTry = tab === "student" ? [pass1, pass2, pass3] : [pass1];
       let res = null;
       let data = null;
 
-      // Rapid-fire test them against the Java backend
       for (let p of passwordsToTry) {
         res = await fetch(`${API_BASE}/api/auth/login`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ registerNumber: tab === "admin" ? "admin" : regNo.trim(), password: p, role: tab }),
@@ -365,7 +344,7 @@ function ThemedLogin({ onLogin }) {
         
         if (res.ok) {
            data = await res.json();
-           break; // SUCCESS! We found the right format, stop testing!
+           break; 
         }
       }
 
@@ -375,7 +354,7 @@ function ThemedLogin({ onLogin }) {
       
       onLogin({ role: data.role || data.user?.role, name: data.name || "", registerNumber: data.registerNumber || (tab === "admin" ? "admin" : regNo.trim()), department: data.department || "Unknown" });
     } catch { 
-      alert("Invalid credentials. Please verify your Register Number and DOB."); 
+      alert("Invalid credentials. Please verify your Register Number and Password."); 
     }
   };
 
@@ -396,12 +375,7 @@ function ThemedLogin({ onLogin }) {
             {tab === "student" ? (
               <div className="relative mt-2">
                 <label className="text-[10px] font-bold text-gray-500 absolute -top-2 left-3 bg-white px-1 uppercase tracking-wider">Date of Birth</label>
-                <input 
-                  type="date" 
-                  value={password} 
-                  onChange={(e) => setPassword(e.target.value)} 
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-gray-700" 
-                />
+                <input type="date" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-gray-700" />
               </div>
             ) : (
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
@@ -449,6 +423,9 @@ function AdminDashboard({ onLogout }) {
   
   const [customCols, setCustomCols] = useState([]);
   const [savedPapers, setSavedPapers] = useState([]);
+  
+  // NEW: Settings State
+  const [newAdminPassword, setNewAdminPassword] = useState("");
 
   const deptRef = useRef(dept); 
   const manualDeptRef = useRef(manualDept); 
@@ -459,35 +436,23 @@ function AdminDashboard({ onLogout }) {
     setPreviewData([]); setMessage(""); 
   }, [dept, sem, activeTab, calcDept, calcSem, manualDept, manualSem]);
 
-  // FIX 1: Bulletproof subject fetching
   useEffect(() => {
     if (activeTab === "grid" && gridType === "internal") {
       fetch(`${API_BASE}/api/import/fetch-subjects?department=${dept}&semester=${sem}&paperType=${gridPaperType}`)
-        .then(res => {
-            if (!res.ok) throw new Error("Server Error");
-            return res.json();
-        })
+        .then(res => { if (!res.ok) throw new Error("Server Error"); return res.json(); })
         .then(data => {
             const arr = Array.isArray(data) ? data : [];
             setGridSubjectList(arr); 
             if(arr.length > 0) setGridSubject(arr[0].subjectCode); else setGridSubject(""); 
         })
-        .catch(err => {
-            console.warn("Failed to fetch subjects for grid");
-            setGridSubjectList([]);
-            setGridSubject("");
-        });
+        .catch(err => { setGridSubjectList([]); setGridSubject(""); });
     }
   }, [dept, sem, gridPaperType, activeTab, gridType]);
 
-  // FIX 2: Bulletproof paper fetching
   useEffect(() => {
     if (activeTab === "qpapers") {
       fetch(`${API_BASE}/api/import/question-papers`)
-        .then(res => {
-            if (!res.ok) throw new Error("Server Error");
-            return res.json();
-        })
+        .then(res => { if (!res.ok) throw new Error("Server Error"); return res.json(); })
         .then(data => setSavedPapers(Array.isArray(data) ? data : []))
         .catch(() => setSavedPapers([]));
     }
@@ -506,57 +471,30 @@ function AdminDashboard({ onLogout }) {
     } catch (err) { setMessage(`❌ Error: ${err.message}`); return false; } finally { setLoading(false); }
   };
 
-  const handleSubjectUpload = (e) => { const file = e.target.files[0]; if (!file) return; const currentDept = deptRef.current; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); return { subjectCode: n.subjectcode || n["subject code"], subjectName: n.subjectname || n["subject name"], department: currentDept, semester: parseInt(sem), l: parseInt(n.l)||0, t: parseInt(n.t)||0, p: parseInt(n.p)||0, credits: parseInt(n.c)||0, paperType: "THEORY" }; }); apiPost("/api/import/subjects", mapped); }); };
-  
-  const handleLoginUpload = (e) => { 
-      const file = e.target.files[0]; 
-      if (!file) return; 
-      readFirstSheet(file, (rows) => { 
-        const mapped = rows.map((r) => { 
-          const n = normalizeRowKeys(r); 
-          let rawPassword = "";
-          for (let k in n) {
-              if (k.includes("dob") || k.includes("birth") || k.includes("pass")) {
-                  rawPassword = String(n[k]).trim();
-                  break;
-              }
-          }
-          
-          let formattedPassword = rawPassword;
-          // --- STRICT DD-MM-YYYY DATABASE LOGIC ---
-          if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(rawPassword)) {
-              // If Excel gives DD-MM-YYYY, keep it and ensure 0-padding
-              const parts = rawPassword.split(/[\/\-]/);
-              formattedPassword = `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
-          } else if (/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(rawPassword)) {
-              // If Excel is YYYY-MM-DD, flip it to DD-MM-YYYY
-              const parts = rawPassword.split(/[\/\-]/);
-              formattedPassword = `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
-          } else if (!isNaN(rawPassword) && Number(rawPassword) > 20000) {
-              // If Excel sends a weird number, convert directly to DD-MM-YYYY
-              const dateObj = new Date((Number(rawPassword) - 25569) * 86400 * 1000);
-              const y = dateObj.getFullYear();
-              const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-              const d = String(dateObj.getDate()).padStart(2, '0');
-              formattedPassword = `${d}-${m}-${y}`; 
-          }
-          // ------------------------------------------
-
-          return { 
-            registerNumber: n.registerNumber, 
-            name: n.name, 
-            password: formattedPassword, 
-            department: n.department || "", 
-            semester: n.semester ? parseInt(n.semester) : parseInt(sem), 
-            role: uploadRole 
-          }; 
-        }); 
-        const validRows = mapped.filter(m => m.registerNumber); 
-        if(validRows.length === 0) { setMessage("⚠️ No valid Register Numbers found."); return; } 
-        apiPost("/api/import/logins", validRows); 
-      }); 
+  // NEW: Handle Admin Password Change
+  const handleAdminPasswordChange = async () => {
+    if(!newAdminPassword) return alert("Please enter a new password");
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/admin/password`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: newAdminPassword })
+      });
+      if(res.ok) {
+         setMessage("✅ Admin password updated successfully!");
+         setNewAdminPassword("");
+      } else {
+         setMessage("❌ Failed to update admin password. Check backend endpoint.");
+      }
+    } catch(err) {
+      setMessage("❌ Network error while updating password.");
+    }
+    setLoading(false);
   };
 
+  const handleSubjectUpload = (e) => { const file = e.target.files[0]; if (!file) return; const currentDept = deptRef.current; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); return { subjectCode: n.subjectcode || n["subject code"], subjectName: n.subjectname || n["subject name"], department: currentDept, semester: parseInt(sem), l: parseInt(n.l)||0, t: parseInt(n.t)||0, p: parseInt(n.p)||0, credits: parseInt(n.c)||0, paperType: "THEORY" }; }); apiPost("/api/import/subjects", mapped); }); };
+  const handleLoginUpload = (e) => { const file = e.target.files[0]; if (!file) return; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); let rawPassword = ""; for (let k in n) { if (k.includes("dob") || k.includes("birth") || k.includes("pass")) { rawPassword = String(n[k]).trim(); break; } } let formattedPassword = rawPassword; if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(rawPassword)) { const parts = rawPassword.split(/[\/\-]/); formattedPassword = `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`; } else if (/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(rawPassword)) { const parts = rawPassword.split(/[\/\-]/); formattedPassword = `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`; } else if (!isNaN(rawPassword) && Number(rawPassword) > 20000) { const dateObj = new Date((Number(rawPassword) - 25569) * 86400 * 1000); const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0'); const d = String(dateObj.getDate()).padStart(2, '0'); formattedPassword = `${d}-${m}-${y}`; } return { registerNumber: n.registerNumber, name: n.name, password: formattedPassword, department: n.department || "", semester: n.semester ? parseInt(n.semester) : parseInt(sem), role: uploadRole }; }); const validRows = mapped.filter(m => m.registerNumber); if(validRows.length === 0) { setMessage("⚠️ No valid Register Numbers found."); return; } apiPost("/api/import/logins", validRows); }); };
   const fetchSubjects = async (type) => { setPaperType(type); setSubjectList([]); setSelectedSubject(""); setMessage(`Fetching ${type} subjects...`); try { const res = await fetch(`${API_BASE}/api/import/fetch-subjects?department=${dept}&semester=${sem}&paperType=${type}`); if (!res.ok) throw new Error("Failed to fetch subjects"); const data = await res.json(); setSubjectList(data); if (data.length === 0) setMessage(`⚠️ No ${type} subjects found.`); else setMessage(""); } catch (err) { setMessage(`❌ Error: ${err.message}`); } };
   const handleInternalUpload = () => { if (!internalFile || !selectedSubject) { setMessage("⚠️ Select a subject and file first."); return; } const formData = new FormData(); formData.append("file", internalFile); formData.append("subjectCode", selectedSubject); formData.append("department", dept); apiPost("/api/import/internal-upload", formData, true); };
   const handleExternalUpload = (e) => { const file = e.target.files[0]; if (!file) return; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); return { registerNumber: n.registerNumber, subjectCode: n.subjectcode || n.subject, externalMarks: parseInt(n.mark) || 0 }; }); apiPost("/api/import/external", mapped); }); };
@@ -585,267 +523,19 @@ function AdminDashboard({ onLogout }) {
     try {
       const res = await fetch(`${API_BASE}/api/import/question-paper/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (res.ok) {
-        setMessage(`✅ Success: ${data.message}`);
-        setSavedPapers(prev => prev.filter(paper => paper.id !== id));
-      } else { setMessage(`❌ Error: ${data.error}`); }
+      if (res.ok) { setMessage(`✅ Success: ${data.message}`); setSavedPapers(prev => prev.filter(paper => paper.id !== id)); } 
+      else { setMessage(`❌ Error: ${data.error}`); }
     } catch (err) { setMessage("❌ Network error during deletion."); }
     setLoading(false);
   };
   
-  const handleSmartScanUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.type === "application/pdf") { alert("⚠️ The AI Scanner requires an Image file (PNG/JPG). Please take a screenshot of your PDF and upload the image!"); return; }
-    
-    setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowOcrModal(true);
-    try {
-      const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) });
-      setOcrText(result.data.text);
-      setMessage("✅ Smart Scan complete. Please verify the extracted text below.");
-    } catch (err) {
-      setMessage("❌ OCR Failed. Make sure the image is clear, or try a different file.");
-      setShowOcrModal(false);
-    }
-    setLoading(false);
-  };
+  const handleSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ The AI Scanner requires an Image file (PNG/JPG). Please take a screenshot of your PDF and upload the image!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted text below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear, or try a different file."); setShowOcrModal(false); } setLoading(false); };
+  const parseOcrDataToDB = () => { const currentDept = deptRef.current; const currentSem = String(sem); const lines = ocrText.split('\n'); const finalPayload = []; const regex = /(1127\d{8}|[A-Z0-9]{10,14}).*?(\d{1,3})/i; lines.forEach(line => { const match = line.match(regex); if (match) { const regNo = match[1].toUpperCase(); const mark = parseInt(match[2]); if (mark <= 100) { finalPayload.push({ registerNumber: regNo, subjectCode: selectedSubject || "SCANNED", semester: currentSem, grade: mark >= 50 ? "PASS" : "FAIL", result: mark >= 50 ? "PASS" : "FAIL", mark: String(mark), department: currentDept }); } } }); if (finalPayload.length === 0) { alert("⚠️ Could not find valid Register Numbers and Marks in the text."); return; } if(!confirm(`📢 SCANNED UPLOAD:\nFound ${finalPayload.length} valid students.\nClick OK to upload directly to Drafts.`)) return; apiPost("/api/import/results", finalPayload).then((success) => { if(success) { setShowOcrModal(false); setTimeout(() => handlePreview(currentSem, currentDept), 1500); } }); };
+  const handleManualSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ You uploaded a PDF. Please change the Dropdown above to 'Native PDF' instead of 'AI Smart Scan'!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowManualOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setManualOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted grades below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear."); setShowManualOcrModal(false); } setLoading(false); };
+  const parseManualOcrDataToDB = () => { const currentDept = manualDeptRef.current; const currentSem = String(manualSemRef.current); const lines = manualOcrText.split('\n'); const finalPayload = []; let globalRegNo = null; lines.forEach(line => { const rMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/i); if (rMatch && !globalRegNo) globalRegNo = rMatch[1].toUpperCase(); }); lines.forEach(line => { const regMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/i); const subjMatch = line.match(/\b([A-Z]{2,3}\d{4,5})\b/i); const gradesRegex = /\b(O|0|Ο|A\+|A|B\+|B|C|U|RA|AB|SA|W|FAIL|PASS)\b/ig; let grades = []; let match; while ((match = gradesRegex.exec(line)) !== null) { grades.push(match[1].toUpperCase().replace(/0|Ο/g, 'O')); } if (grades.length > 0) { const gradeVal = grades[grades.length - 1]; const isFail = ["U", "RA", "AB", "FAIL", "F", "ABSENT", "WH", "W", "SA"].includes(gradeVal); if (subjMatch && globalRegNo) { const subjCode = subjMatch[1].toUpperCase(); if (!finalPayload.some(p => p.registerNumber === globalRegNo && p.subjectCode === subjCode)) { finalPayload.push({ registerNumber: globalRegNo, subjectCode: subjCode, semester: currentSem, grade: gradeVal, result: isFail ? "FAIL" : "PASS", mark: "0", department: currentDept }); } } else if (regMatch && manualOcrSubject) { const regNo = regMatch[1].toUpperCase(); if (!finalPayload.some(p => p.registerNumber === regNo && p.subjectCode === manualOcrSubject)) { finalPayload.push({ registerNumber: regNo, subjectCode: manualOcrSubject.trim().toUpperCase(), semester: currentSem, grade: gradeVal, result: isFail ? "FAIL" : "PASS", mark: "0", department: currentDept }); } } } }); if (finalPayload.length === 0) { alert("⚠️ Could not find valid grades in the text."); return; } if(!confirm(`📢 SCANNED MANUAL UPLOAD:\nTarget Dept: ${currentDept}\nTarget Sem: ${currentSem}\nFound ${finalPayload.length} valid grades.\nClick OK to upload to Drafts.`)) return; apiPost("/api/import/results", finalPayload).then((success) => { if(success) { setShowManualOcrModal(false); setTimeout(() => handlePreview(currentSem, currentDept), 1500); } }); };
+  const handleManualPDFUpload = async (e) => { const file = e.target.files[0]; if (!file) return; setLoading(true); setMessage("📄 Extracting text and mapping grades from PDF... Please wait."); try { const arrayBuffer = await file.arrayBuffer(); const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise; let allLines = []; for (let i = 1; i <= pdf.numPages; i++) { const page = await pdf.getPage(i); const content = await page.getTextContent(); const itemsByY = {}; content.items.forEach(item => { const y = Math.round(item.transform[5]); let targetY = y; for (let existingY in itemsByY) { if (Math.abs(existingY - y) < 5) { targetY = existingY; break; } } if (!itemsByY[targetY]) itemsByY[targetY] = []; itemsByY[targetY].push(item); }); const yCoords = Object.keys(itemsByY).sort((a, b) => b - a); yCoords.forEach(y => { const lineItems = itemsByY[y].sort((a, b) => a.transform[4] - b.transform[4]); const lineText = lineItems.map(item => item.str.trim()).filter(str => str.length > 0).join(" "); if (lineText) allLines.push(lineText); }); } const currentDept = manualDeptRef.current; const currentSem = String(manualSemRef.current); const finalPayload = []; let currentSubjects = []; allLines.forEach(line => { const subjectMatches = line.match(/\b[A-Z]{2,3}\d{4,5}\b/g); if (subjectMatches && subjectMatches.length >= 2) { currentSubjects = subjectMatches; } const regMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/); if (regMatch && currentSubjects.length > 0) { const regNo = regMatch[1].toUpperCase(); const afterRegNo = line.substring(line.indexOf(regNo) + regNo.length); const gradeRegex = /\b(O|0|Ο|A\+|A|B\+|B|C|U|RA|AB|SA|W|WH\d*)\b/g; const grades = []; let gMatch; while ((gMatch = gradeRegex.exec(afterRegNo)) !== null) { grades.push(gMatch[1].toUpperCase().replace(/0|Ο/g, 'O')); } const validGrades = grades.slice(-currentSubjects.length); for(let i = 0; i < Math.min(validGrades.length, currentSubjects.length); i++) { const gradeVal = validGrades[i]; const isFail = ["U", "RA", "AB", "FAIL", "F", "ABSENT", "WH", "WH1", "W", "SA"].includes(gradeVal); finalPayload.push({ registerNumber: regNo, subjectCode: currentSubjects[i], semester: currentSem, grade: gradeVal, result: isFail ? "FAIL" : "PASS", mark: "0", department: currentDept }); } } }); if (finalPayload.length === 0) { alert("⚠️ Could not find valid Students and Subjects in this PDF."); setLoading(false); return; } if(!confirm(`📢 PDF PROCESSED:\nTarget Dept: ${currentDept}\nTarget Sem: ${currentSem}\nMapped ${finalPayload.length} total grades from the PDF.\nClick OK to upload to Drafts.`)) { setLoading(false); return; } apiPost("/api/import/results", finalPayload).then((success) => { if(success) { setTimeout(() => handlePreview(currentSem, currentDept), 1500); } }); } catch (err) { console.error(err); setMessage("❌ Failed to process PDF. Is it password protected?"); } setLoading(false); };
+  const handleCustomTemplateUpload = (e) => { const file = e.target.files[0]; if(!file) return; readFirstSheet(file, (rows) => { if(rows.length > 0) { const originalHeaders = Object.keys(rows[0]).filter(k => k.toLowerCase() !== "registernumber" && k.toLowerCase() !== "name"); setCustomCols(originalHeaders); const resetData = gridData.map(s => { const newStudent = { registerNumber: s.registerNumber, name: s.name }; originalHeaders.forEach(h => newStudent[h] = ""); return newStudent; }); setGridData(resetData); setMessage("✅ Custom Grid Template Loaded! You can now start entering data."); } }); };
 
-  const parseOcrDataToDB = () => {
-      const currentDept = deptRef.current; 
-      const currentSem = String(sem);
-      const lines = ocrText.split('\n');
-      const finalPayload = [];
-      const regex = /(1127\d{8}|[A-Z0-9]{10,14}).*?(\d{1,3})/i;
-
-      lines.forEach(line => {
-          const match = line.match(regex);
-          if (match) {
-              const regNo = match[1].toUpperCase();
-              const mark = parseInt(match[2]);
-              if (mark <= 100) {
-                 finalPayload.push({
-                     registerNumber: regNo, subjectCode: selectedSubject || "SCANNED", semester: currentSem, grade: mark >= 50 ? "PASS" : "FAIL", result: mark >= 50 ? "PASS" : "FAIL", mark: String(mark), department: currentDept
-                 });
-              }
-          }
-      });
-      if (finalPayload.length === 0) { alert("⚠️ Could not find valid Register Numbers and Marks in the text."); return; }
-      if(!confirm(`📢 SCANNED UPLOAD:\nFound ${finalPayload.length} valid students.\nClick OK to upload directly to Drafts.`)) return; 
-      
-      apiPost("/api/import/results", finalPayload).then((success) => { 
-          if(success) { setShowOcrModal(false); setTimeout(() => handlePreview(currentSem, currentDept), 1500); }
-      });
-  };
-
-  const handleManualSmartScanUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (file.type === "application/pdf") {
-        alert("⚠️ You uploaded a PDF. Please change the Dropdown above to 'Native PDF' instead of 'AI Smart Scan'!");
-        return;
-    }
-
-    setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowManualOcrModal(true);
-    try {
-      const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) });
-      setManualOcrText(result.data.text);
-      setMessage("✅ Smart Scan complete. Please verify the extracted grades below.");
-    } catch (err) {
-      setMessage("❌ OCR Failed. Make sure the image is clear.");
-      setShowManualOcrModal(false);
-    }
-    setLoading(false);
-  };
-
-  const parseManualOcrDataToDB = () => {
-      const currentDept = manualDeptRef.current;
-      const currentSem = String(manualSemRef.current);
-      const lines = manualOcrText.split('\n');
-      const finalPayload = [];
-
-      let globalRegNo = null;
-      lines.forEach(line => {
-          const rMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/i);
-          if (rMatch && !globalRegNo) globalRegNo = rMatch[1].toUpperCase();
-      });
-
-      lines.forEach(line => {
-          const regMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/i);
-          const subjMatch = line.match(/\b([A-Z]{2,3}\d{4,5})\b/i);
-          
-          const gradesRegex = /\b(O|0|Ο|A\+|A|B\+|B|C|U|RA|AB|SA|W|FAIL|PASS)\b/ig;
-          let grades = [];
-          let match;
-          while ((match = gradesRegex.exec(line)) !== null) {
-              grades.push(match[1].toUpperCase().replace(/0|Ο/g, 'O'));
-          }
-
-          if (grades.length > 0) {
-              const gradeVal = grades[grades.length - 1]; 
-              const isFail = ["U", "RA", "AB", "FAIL", "F", "ABSENT", "WH", "W", "SA"].includes(gradeVal);
-
-              if (subjMatch && globalRegNo) {
-                  const subjCode = subjMatch[1].toUpperCase();
-                  if (!finalPayload.some(p => p.registerNumber === globalRegNo && p.subjectCode === subjCode)) {
-                      finalPayload.push({
-                          registerNumber: globalRegNo,
-                          subjectCode: subjCode,
-                          semester: currentSem,
-                          grade: gradeVal,
-                          result: isFail ? "FAIL" : "PASS",
-                          mark: "0",
-                          department: currentDept
-                      });
-                  }
-              }
-              else if (regMatch && manualOcrSubject) {
-                  const regNo = regMatch[1].toUpperCase();
-                  if (!finalPayload.some(p => p.registerNumber === regNo && p.subjectCode === manualOcrSubject)) {
-                      finalPayload.push({
-                          registerNumber: regNo,
-                          subjectCode: manualOcrSubject.trim().toUpperCase(),
-                          semester: currentSem,
-                          grade: gradeVal,
-                          result: isFail ? "FAIL" : "PASS",
-                          mark: "0",
-                          department: currentDept
-                      });
-                  }
-              }
-          }
-      });
-
-      if (finalPayload.length === 0) { alert("⚠️ Could not find valid grades in the text."); return; }
-      if(!confirm(`📢 SCANNED MANUAL UPLOAD:\nTarget Dept: ${currentDept}\nTarget Sem: ${currentSem}\nFound ${finalPayload.length} valid grades.\nClick OK to upload to Drafts.`)) return;
-
-      apiPost("/api/import/results", finalPayload).then((success) => {
-          if(success) { setShowManualOcrModal(false); setTimeout(() => handlePreview(currentSem, currentDept), 1500); }
-      });
-  };
-
-  const handleManualPDFUpload = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      setLoading(true);
-      setMessage("📄 Extracting text and mapping grades from PDF... Please wait.");
-
-      try {
-          const arrayBuffer = await file.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-          let allLines = [];
-
-          for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const content = await page.getTextContent();
-
-              const itemsByY = {};
-              content.items.forEach(item => {
-                  const y = Math.round(item.transform[5]);
-                  let targetY = y;
-                  for (let existingY in itemsByY) {
-                      if (Math.abs(existingY - y) < 5) {
-                          targetY = existingY;
-                          break;
-                      }
-                  }
-                  if (!itemsByY[targetY]) itemsByY[targetY] = [];
-                  itemsByY[targetY].push(item);
-              });
-
-              const yCoords = Object.keys(itemsByY).sort((a, b) => b - a); 
-              yCoords.forEach(y => {
-                  const lineItems = itemsByY[y].sort((a, b) => a.transform[4] - b.transform[4]); 
-                  const lineText = lineItems.map(item => item.str.trim()).filter(str => str.length > 0).join(" ");
-                  if (lineText) allLines.push(lineText);
-              });
-          }
-
-          const currentDept = manualDeptRef.current;
-          const currentSem = String(manualSemRef.current);
-          const finalPayload = [];
-          let currentSubjects = [];
-
-          allLines.forEach(line => {
-              const subjectMatches = line.match(/\b[A-Z]{2,3}\d{4,5}\b/g);
-              if (subjectMatches && subjectMatches.length >= 2) {
-                  currentSubjects = subjectMatches;
-              }
-
-              const regMatch = line.match(/\b(1127\d{8}|[A-Z0-9]{10,14})\b/);
-              if (regMatch && currentSubjects.length > 0) {
-                  const regNo = regMatch[1].toUpperCase();
-                  const afterRegNo = line.substring(line.indexOf(regNo) + regNo.length);
-                  
-                  const gradeRegex = /\b(O|0|Ο|A\+|A|B\+|B|C|U|RA|AB|SA|W|WH\d*)\b/g;
-                  const grades = [];
-                  let gMatch;
-                  while ((gMatch = gradeRegex.exec(afterRegNo)) !== null) {
-                      grades.push(gMatch[1].toUpperCase().replace(/0|Ο/g, 'O'));
-                  }
-
-                  const validGrades = grades.slice(-currentSubjects.length);
-
-                  for(let i = 0; i < Math.min(validGrades.length, currentSubjects.length); i++) {
-                      const gradeVal = validGrades[i];
-                      const isFail = ["U", "RA", "AB", "FAIL", "F", "ABSENT", "WH", "WH1", "W", "SA"].includes(gradeVal);
-                      
-                      finalPayload.push({
-                          registerNumber: regNo,
-                          subjectCode: currentSubjects[i],
-                          semester: currentSem,
-                          grade: gradeVal,
-                          result: isFail ? "FAIL" : "PASS",
-                          mark: "0",
-                          department: currentDept
-                      });
-                  }
-              }
-          });
-
-          if (finalPayload.length === 0) {
-              alert("⚠️ Could not find valid Students and Subjects in this PDF.");
-              setLoading(false);
-              return;
-          }
-
-          if(!confirm(`📢 PDF PROCESSED:\nTarget Dept: ${currentDept}\nTarget Sem: ${currentSem}\nMapped ${finalPayload.length} total grades from the PDF.\nClick OK to upload to Drafts.`)) {
-              setLoading(false);
-              return;
-          }
-
-          apiPost("/api/import/results", finalPayload).then((success) => {
-              if(success) { setTimeout(() => handlePreview(currentSem, currentDept), 1500); }
-          });
-
-      } catch (err) {
-          console.error(err);
-          setMessage("❌ Failed to process PDF. Is it password protected?");
-      }
-      setLoading(false);
-  };
-
-  const handleCustomTemplateUpload = (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
-    readFirstSheet(file, (rows) => {
-       if(rows.length > 0) {
-          const originalHeaders = Object.keys(rows[0]).filter(k => k.toLowerCase() !== "registernumber" && k.toLowerCase() !== "name");
-          setCustomCols(originalHeaders);
-          
-          const resetData = gridData.map(s => {
-             const newStudent = { registerNumber: s.registerNumber, name: s.name };
-             originalHeaders.forEach(h => newStudent[h] = "");
-             return newStudent;
-          });
-          setGridData(resetData);
-          setMessage("✅ Custom Grid Template Loaded! You can now start entering data.");
-       }
-    });
-  };
-
-  // FIX 3: Bulletproof Student fetching
   const fetchStudentsForGrid = async () => {
     if(!gridSubject.trim() && gridType === "external") { alert("Please enter the Subject Code."); return; }
     setLoading(true);
@@ -1014,14 +704,34 @@ function AdminDashboard({ onLogout }) {
           <button onClick={() => setActiveTab("manual")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "manual" ? "border-b-2 border-orange-500 text-orange-600" : "text-gray-500 hover:text-orange-600"}`}>5. Final Override</button>
           <button onClick={() => setActiveTab("manage")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "manage" ? "border-b-2 border-red-600 text-red-600" : "text-gray-500 hover:text-red-600"}`}>6. Manage Live</button>
           <button onClick={() => setActiveTab("qpapers")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "qpapers" ? "border-b-2 border-purple-600 text-purple-700" : "text-gray-500 hover:text-purple-700"}`}>7. Question Papers</button>
-          
-          {/* NEW GPA TAB */}
           <button onClick={() => setActiveTab("gpa")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "gpa" ? "border-b-2 border-indigo-600 text-indigo-700" : "text-gray-500 hover:text-indigo-700"}`}>8. GPA Calc</button>
+          
+          {/* NEW SETTINGS TAB */}
+          <button onClick={() => setActiveTab("settings")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "settings" ? "border-b-2 border-gray-800 text-gray-800" : "text-gray-500 hover:text-gray-800"}`}>9. Settings</button>
         </div>
 
         <AnimatePresence>{message && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`p-4 rounded-md mb-6 text-sm font-medium shadow-sm ${message.startsWith("✅") || message.startsWith("🎉") ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>{message}</motion.div>}</AnimatePresence>
         
-        {/* NEW GPA VIEW */}
+        {/* SETTINGS VIEW */}
+        {activeTab === "settings" && (
+           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 max-w-md">
+                <h2 className="text-xl font-bold mb-4 text-gray-800">Admin Security Settings</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">New Admin Password</label>
+                    <input type="password" value={newAdminPassword} onChange={e => setNewAdminPassword(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-800 outline-none" placeholder="Enter new master password" />
+                  </div>
+                  <button onClick={handleAdminPasswordChange} disabled={loading} className="w-full bg-gray-800 text-white font-bold py-3 rounded-lg hover:bg-gray-900 transition-colors shadow-md">
+                    {loading ? "Updating..." : "Update Password"}
+                  </button>
+                  <p className="text-xs text-gray-500 mt-4 text-center">Note: Your backend must have the <code>PUT /api/auth/admin/password</code> endpoint configured to process this request.</p>
+                </div>
+              </div>
+           </motion.div>
+        )}
+
+        {/* GPA VIEW */}
         {activeTab === "gpa" && (
            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="max-w-4xl mx-auto">
@@ -1607,6 +1317,20 @@ function FacultyDashboard({ user, onLogout }) {
     } catch(err) { console.warn("Backend save failed.", err); }
   };
 
+  // NEW: Read Word Document using Mammoth
+  const handleDocxUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        setCustomContent(result.value);
+        alert("✅ Document text successfully extracted!");
+    } catch (err) {
+        alert("❌ Failed to read DOCX file. Make sure it is a valid Word Document.");
+    }
+  };
+
   if (view === "menu") {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
@@ -1670,8 +1394,16 @@ function FacultyDashboard({ user, onLogout }) {
         
         {templateType === 3 ? (
            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-             <h2 className="text-xl font-bold mb-4 text-orange-800">Custom Paper Content</h2>
-             <p className="text-sm text-gray-500 mb-4">Type or paste your entirely custom question paper here. The system will automatically wrap it in the official College Header and formatting.</p>
+             <div className="flex justify-between items-center mb-4">
+                 <h2 className="text-xl font-bold text-orange-800">Custom Paper Content</h2>
+                 
+                 {/* NEW: UPLOAD DOCX BUTTON */}
+                 <label className="bg-orange-100 text-orange-800 border border-orange-300 font-bold py-2 px-4 rounded-lg cursor-pointer hover:bg-orange-200 transition-colors shadow-sm text-sm">
+                    📄 Import from .docx
+                    <input type="file" accept=".docx" onChange={handleDocxUpload} className="hidden" />
+                 </label>
+             </div>
+             <p className="text-sm text-gray-500 mb-4">Type or paste your custom question paper here, OR click the button above to upload an existing `.docx` file to automatically extract the text!</p>
              <textarea value={customContent} onChange={e => setCustomContent(e.target.value)} className="w-full h-96 p-4 border border-gray-300 rounded font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="PART A\n1. Explain XYZ...\n2. What is ABC?\n\nPART B\n3. Calculate..." />
            </div>
         ) : (

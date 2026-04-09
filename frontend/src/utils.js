@@ -40,6 +40,74 @@ export function mergeResults(rows) {
   return Object.values(map);
 }
 
+// --- NEW: OFFICIAL CLAIM FORM EXPORTER ---
+export const exportClaimFormDocx = async (claim) => {
+  try {
+    const createRow = (label, value) => new TableRow({ children: [
+        new TableCell({ children: [new Paragraph({ text: label, bold: true })], width: { size: 40, type: WidthType.PERCENTAGE }, shading: { fill: "f3f4f6" } }),
+        new TableCell({ children: [new Paragraph({ text: value || "-" })], width: { size: 60, type: WidthType.PERCENTAGE } })
+    ]});
+
+    const doc = new Document({
+      sections: [{
+        children: [
+          new Paragraph({ children: [new TextRun({ text: "CLAIM FORM FOR QUESTION PAPER SETTING", bold: true, size: 28 })], alignment: AlignmentType.CENTER }),
+          new Paragraph({ children: [new TextRun({ text: "End Semester Examinations (UG/PG)", size: 20 })], alignment: AlignmentType.CENTER, spacing: { after: 300 } }),
+          
+          new Paragraph({ children: [new TextRun({ text: "Faculty & Assignment Details", bold: true, size: 24 })], spacing: { after: 100 } }),
+          new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [
+                  createRow("Appointment Letter No.", claim.appointmentLetterNo),
+                  createRow("Name of the QP Setter", claim.facultyName),
+                  createRow("Designation", claim.designation),
+                  createRow("College Name & Code", claim.collegeNameCode),
+                  createRow("QP Department", claim.qpDept),
+                  createRow("Department of Examiner", claim.examinerDept),
+                  createRow("Mobile Number", claim.mobile),
+                  createRow("Email ID", claim.email),
+                  createRow("Subject Code & Name", `${claim.subjectCode} - ${claim.subjectName || ""}`),
+                  createRow("Semester & Regulation", claim.semesterAndReg),
+                  createRow("AICTE / Anna Univ ID", claim.aicteId),
+                  createRow("PAN", claim.pan),
+                  createRow("Official Address", claim.address),
+              ]
+          }),
+          
+          new Paragraph({ text: "", spacing: { after: 200 } }),
+          new Paragraph({ children: [new TextRun({ text: "Remuneration Details", bold: true, size: 24 })], spacing: { after: 100 } }),
+          new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [
+                  createRow("Question Paper Type", claim.qpType),
+                  createRow("Amount Claimed (Manual)", "Rs. " + (claim.amountClaimed || "0")),
+                  createRow("Total Calculated Amount", "Rs. " + (claim.totalAmount || "0")),
+                  createRow("Mailed to COE Confirmation", claim.mailedConfirmation ? "YES" : "NO"),
+              ]
+          }),
+          
+          new Paragraph({ text: "", spacing: { after: 200 } }),
+          new Paragraph({ children: [new TextRun({ text: "Bank Details", bold: true, size: 24 })], spacing: { after: 100 } }),
+          new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [
+                  createRow("Bank Account No (Savings)", claim.accountNo),
+                  createRow("Bank Name", claim.bankName),
+                  createRow("Branch Name", claim.branchName),
+                  createRow("IFSC Code", claim.ifsc),
+              ]
+          }),
+        ],
+      }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `ClaimForm_${(claim.facultyName || "Faculty").replace(/\s+/g, '_')}.docx`);
+  } catch (err) {
+    alert("Error exporting Claim Form: " + err.message);
+  }
+};
+
 export const exportSemesterPaperDocx = async (config, templateType) => {
   const { header, partA, partB, partC, customContent } = config;
   try {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import mammoth from "mammoth";
 import { API_BASE, exportSemesterPaperDocx, exportUnitTestPaperDocx } from "../utils";
 
+// ✅ FIXED: Added "export default" right here!
 export default function FacultyDashboard({ user, onLogout }) {
   const [view, setView] = useState("tasks"); 
   const [templateType, setTemplateType] = useState(1);
@@ -108,7 +109,7 @@ export default function FacultyDashboard({ user, onLogout }) {
     const config = { header, partA, partB, partC, customContent };
     await exportSemesterPaperDocx(config, templateType);
     try { 
-      await fetch(`${API_BASE}/api/import/save-question-paper`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subjectCode: header.subject, department: header.department, examSession: header.examSession, hasPartC: templateType === 1, examType: "SEMESTER", paperData: JSON.stringify(config) }) }); 
+      await fetch(`${API_BASE}/api/import/save-question-paper`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subjectCode: header.subject, department: header.department, examSession: header.examSession, hasPartC: templateType === 1, examType: "SEMESTER", facultyName: user.name, paperData: JSON.stringify(config) }) }); 
       if(activeTask) await handleUpdateReqStatus(activeTask.id, "SUBMITTED");
       alert("✅ Document downloaded and sent to Admin Portal!");
       setView("tasks");
@@ -119,7 +120,7 @@ export default function FacultyDashboard({ user, onLogout }) {
     const config = { unitHeader, unitPartA, unitPartB, unitPartC, coDistribution: { marks: coDist.marks, percentage: coDist.perc } };
     await exportUnitTestPaperDocx(config);
     try {
-      await fetch(`${API_BASE}/api/import/save-question-paper`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subjectCode: unitHeader.subject, department: unitHeader.department, examSession: unitHeader.examSession, hasPartC: false, examType: "UNIT_TEST", paperData: JSON.stringify(config) }) });
+      await fetch(`${API_BASE}/api/import/save-question-paper`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subjectCode: unitHeader.subject, department: unitHeader.department, examSession: unitHeader.examSession, hasPartC: false, examType: "UNIT_TEST", facultyName: user.name, paperData: JSON.stringify(config) }) });
       if(activeTask) await handleUpdateReqStatus(activeTask.id, "SUBMITTED");
       alert("✅ Unit Test Document downloaded and sent to Admin Portal!");
       setView("tasks");
@@ -137,7 +138,7 @@ export default function FacultyDashboard({ user, onLogout }) {
     
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
-        <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0"><h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">👨‍🏫 Faculty Portal</h1><div className="flex items-center gap-4"><button onClick={() => setView("menu")} className="text-gray-500 font-bold hover:text-indigo-600">Free Create mode</button><button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button></div></header>
+        <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0"><h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">👨‍🏫 Faculty Portal</h1><div className="flex items-center gap-4"><button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button></div></header>
         <main className="flex-1 max-w-5xl mx-auto w-full p-6">
            <h2 className="text-2xl font-bold text-slate-800 mb-6">My Official Tasks</h2>
            
@@ -260,23 +261,6 @@ export default function FacultyDashboard({ user, onLogout }) {
                  })}
               </div>
            )}
-        </main>
-      </div>
-    );
-  }
-
-  // Fallback Free Create Menu
-  if (view === "menu") {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
-        <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0"><h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">👨‍🏫 Faculty Portal</h1><div className="flex items-center gap-4"><button onClick={() => setView("tasks")} className="text-indigo-600 font-bold bg-indigo-50 px-3 py-1.5 rounded">Return to Tasks</button><button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button></div></header>
-        <main className="flex-1 max-w-4xl mx-auto w-full p-6 flex flex-col items-center justify-center">
-          <h2 className="text-3xl font-bold text-slate-800 mb-2">Free Create Mode</h2>
-          <p className="text-gray-500 mb-8">Generate papers manually without an Admin Requisition.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
-            <div onClick={() => { setActiveTask(null); setView("semester"); }} className="bg-white p-8 rounded-xl shadow-md border border-gray-200 hover:border-indigo-500 hover:shadow-xl transition-all cursor-pointer flex flex-col items-center text-center group"><span className="text-5xl mb-4 group-hover:scale-110 transition-transform">📝</span><h3 className="text-xl font-bold text-indigo-700 mb-2">Semester Question Paper</h3></div>
-            <div onClick={() => { setActiveTask(null); setView("unit"); }} className="bg-white p-8 rounded-xl shadow-md border border-gray-200 hover:border-teal-500 hover:shadow-xl transition-all cursor-pointer flex flex-col items-center text-center group"><span className="text-5xl mb-4 group-hover:scale-110 transition-transform">📋</span><h3 className="text-xl font-bold text-teal-700 mb-2">Unit Test Question Paper</h3></div>
-          </div>
         </main>
       </div>
     );

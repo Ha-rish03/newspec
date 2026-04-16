@@ -4,18 +4,18 @@ import * as XLSX from "xlsx";
 import Tesseract from "tesseract.js";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 
-// Import your shared utilities, exporters, and GPA Calculator!
-import { API_BASE, normalizeRowKeys, readFirstSheet, exportSemesterPaperDocx, exportUnitTestPaperDocx, exportClaimFormDocx } from "../utils.js";
+import { API_BASE, normalizeRowKeys, readFirstSheet, exportSemesterPaperDocx, exportUnitTestPaperDocx, exportClaimFormDocx, mergeResults } from "../utils.js";
 import GPACalculator from "./GPACalculator"; 
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
 
 export default function AdminDashboard({ onLogout }) {
-  const [activeTab, setActiveTab] = useState("qpapers"); 
+  const [activeTab, setActiveTab] = useState("profiles"); // Default to new tab for testing
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const DEPARTMENTS = ["CSE", "IT", "ECE", "EEE", "AIDS", "MECH", "CIVIL", "AERO","CSBS","BIOTECH"];
   
+  // Standard States
   const [dept, setDept] = useState("CSE"); 
   const [sem, setSem] = useState(3); 
   const [uploadRole, setUploadRole] = useState("student");
@@ -59,6 +59,19 @@ export default function AdminDashboard({ onLogout }) {
   const [qPaperSubTab, setQPaperSubTab] = useState("bank");
   const [viewingClaim, setViewingClaim] = useState(null);
 
+  // HALL TICKET STATE
+  const [htDept, setHtDept] = useState("CSE");
+  const [htSem, setHtSem] = useState("3");
+  const [htSession, setHtSession] = useState("November / December 2026");
+  const [htCentre, setHtCentre] = useState("1127 : ST. PETER'S COLLEGE OF ENGINEERING AND TECHNOLOGY");
+  const [htNotes, setHtNotes] = useState("1. This Hall Ticket is valid only if the candidate's admission is approved.\n2. Correction in Name/DOB/Photo should be reported immediately.\n3. Instructions printed overleaf must be strictly followed.");
+  const [generatedTickets, setGeneratedTickets] = useState([]);
+  const [isGeneratingHT, setIsGeneratingHT] = useState(false);
+
+  // --- NEW: PROFILES STATE ---
+  const [profileStudents, setProfileStudents] = useState([]);
+  const [profileSearch, setProfileSearch] = useState("");
+
   const deptRef = useRef(dept); 
   const manualDeptRef = useRef(manualDept); 
   const manualSemRef = useRef(manualSem);   
@@ -71,28 +84,35 @@ export default function AdminDashboard({ onLogout }) {
   useEffect(() => {
     if (activeTab === "grid" && gridType === "internal") {
       fetch(`${API_BASE}/api/import/fetch-subjects?department=${dept}&semester=${sem}&paperType=${gridPaperType}`)
-        .then(res => { if (!res.ok) throw new Error("Server Error"); return res.json(); })
+        .then(res => res.ok ? res.json() : [])
         .then(data => {
             const arr = Array.isArray(data) ? data : [];
             setGridSubjectList(arr); 
             if(arr.length > 0) setGridSubject(arr[0].subjectCode); else setGridSubject(""); 
-        }).catch(err => { setGridSubjectList([]); setGridSubject(""); });
+        }).catch(() => { setGridSubjectList([]); setGridSubject(""); });
     }
   }, [dept, sem, gridPaperType, activeTab, gridType]);
 
   useEffect(() => {
     if (activeTab === "qpapers") {
-      fetch(`${API_BASE}/api/import/question-papers`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => setSavedPapers(Array.isArray(data) ? data : []))
-        .catch(() => setSavedPapers([]));
-        
-      fetch(`${API_BASE}/api/requisitions`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => setRequisitions(Array.isArray(data) ? data : []))
-        .catch(() => setRequisitions([]));
+      fetch(`${API_BASE}/api/import/question-papers`).then(res => res.ok ? res.json() : []).then(data => setSavedPapers(Array.isArray(data) ? data : [])).catch(() => setSavedPapers([]));
+      fetch(`${API_BASE}/api/requisitions`).then(res => res.ok ? res.json() : []).then(data => setRequisitions(Array.isArray(data) ? data : [])).catch(() => setRequisitions([]));
+    }
+    // FETCH PROFILES WHEN TAB OPENS
+    if (activeTab === "profiles") {
+      fetchProfiles();
     }
   }, [activeTab, qPaperSubTab]);
+
+  const fetchProfiles = async () => {
+     try {
+         const res = await fetch(`${API_BASE}/api/import/logins`);
+         if(res.ok) {
+             const data = await res.json();
+             setProfileStudents(data.filter(u => u.role === 'student'));
+         }
+     } catch(e) { console.warn(e); }
+  };
 
   const [paperType, setPaperType] = useState(null); const [subjectList, setSubjectList] = useState([]); const [selectedSubject, setSelectedSubject] = useState(""); const [internalFile, setInternalFile] = useState(null);
   const [previewData, setPreviewData] = useState([]); const [loadingPreview, setLoadingPreview] = useState(false);
@@ -107,6 +127,40 @@ export default function AdminDashboard({ onLogout }) {
     } catch (err) { setMessage(`❌ Error: ${err.message}`); return false; } finally { setLoading(false); }
   };
 
+  // --- NEW: PHOTO UPLOAD LOGIC ---
+  const handlePhotoUpload = async (regNo, e) => {
+     const file = e.target.files[0];
+     if (!file) return;
+     
+     // Optional: Validate file size (e.g., max 2MB)
+     if (file.size > 2 * 1024 * 1024) {
+         return alert("Image is too large. Please upload an image under 2MB.");
+     }
+
+     const formData = new FormData();
+     formData.append("photo", file);
+     
+     setLoading(true);
+     setMessage(`⏳ Uploading photo for ${regNo}...`);
+     try {
+         const response = await fetch(`${API_BASE}/api/students/${regNo}/photo`, {
+             method: "POST",
+             body: formData
+         });
+         if (response.ok) {
+             setMessage(`✅ Successfully updated photo for ${regNo}`);
+             // Force image reload on frontend by triggering a re-render with a new timestamp
+             setProfileStudents(prev => prev.map(s => s.registerNumber === regNo ? {...s, photoUpdateTs: Date.now()} : s));
+         } else {
+             setMessage(`❌ Failed to upload photo for ${regNo}`);
+         }
+     } catch (err) {
+         setMessage(`❌ Network error while uploading photo.`);
+     }
+     setLoading(false);
+  };
+
+  // Admin Password
   const handleAdminPasswordChange = async () => {
     if(!newAdminPassword) return alert("Please enter a new password");
     setLoading(true);
@@ -117,6 +171,7 @@ export default function AdminDashboard({ onLogout }) {
     setLoading(false);
   };
 
+  // Requisitions
   const handleCreateRequisition = async () => {
     if(!reqSubject || !reqFaculty || !reqDeadline || !reqApptNo || !reqTitle) return alert("Please fill all fields to send request.");
     const payload = { department: reqDept, semester: reqSem, subjectCode: reqSubject.toUpperCase(), courseTitle: reqTitle, examType: reqType, facultyId: reqFaculty, deadline: reqDeadline, appointmentLetterNo: reqApptNo, status: "PENDING" };
@@ -127,6 +182,7 @@ export default function AdminDashboard({ onLogout }) {
     }
   };
 
+  // Standard Handlers
   const handleSubjectUpload = (e) => { const file = e.target.files[0]; if (!file) return; const currentDept = deptRef.current; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); return { subjectCode: n.subjectcode || n["subject code"], subjectName: n.subjectname || n["subject name"], department: currentDept, semester: parseInt(sem), l: parseInt(n.l)||0, t: parseInt(n.t)||0, p: parseInt(n.p)||0, credits: parseInt(n.c)||0, paperType: "THEORY" }; }); apiPost("/api/import/subjects", mapped); }); };
   const handleLoginUpload = (e) => { const file = e.target.files[0]; if (!file) return; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); let rawPassword = ""; for (let k in n) { if (k.includes("dob") || k.includes("birth") || k.includes("pass")) { rawPassword = String(n[k]).trim(); break; } } let formattedPassword = rawPassword; if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(rawPassword)) { const parts = rawPassword.split(/[\/\-]/); formattedPassword = `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`; } else if (/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(rawPassword)) { const parts = rawPassword.split(/[\/\-]/); formattedPassword = `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`; } else if (!isNaN(rawPassword) && Number(rawPassword) > 20000) { const dateObj = new Date((Number(rawPassword) - 25569) * 86400 * 1000); const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0'); const d = String(dateObj.getDate()).padStart(2, '0'); formattedPassword = `${d}-${m}-${y}`; } return { registerNumber: n.registerNumber, name: n.name, password: formattedPassword, department: n.department || "", semester: n.semester ? parseInt(n.semester) : parseInt(sem), role: uploadRole }; }); const validRows = mapped.filter(m => m.registerNumber); if(validRows.length === 0) { setMessage("⚠️ No valid Register Numbers found."); return; } apiPost("/api/import/logins", validRows); }); };
   const fetchSubjects = async (type) => { setPaperType(type); setSubjectList([]); setSelectedSubject(""); setMessage(`Fetching ${type} subjects...`); try { const res = await fetch(`${API_BASE}/api/import/fetch-subjects?department=${dept}&semester=${sem}&paperType=${type}`); if (!res.ok) throw new Error("Failed to fetch subjects"); const data = await res.json(); setSubjectList(data); if (data.length === 0) setMessage(`⚠️ No ${type} subjects found.`); else setMessage(""); } catch (err) { setMessage(`❌ Error: ${err.message}`); } };
@@ -152,6 +208,7 @@ export default function AdminDashboard({ onLogout }) {
     setLoading(false); 
   };
   
+  // OCR & PDF Processing Data
   const handleSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ The AI Scanner requires an Image file (PNG/JPG). Please take a screenshot of your PDF and upload the image!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted text below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear, or try a different file."); setShowOcrModal(false); } setLoading(false); };
   const parseOcrDataToDB = () => { const currentDept = deptRef.current; const currentSem = String(sem); const lines = ocrText.split('\n'); const finalPayload = []; const regex = /(1127\d{8}|[A-Z0-9]{10,14}).*?(\d{1,3})/i; lines.forEach(line => { const match = line.match(regex); if (match) { const regNo = match[1].toUpperCase(); const mark = parseInt(match[2]); if (mark <= 100) { finalPayload.push({ registerNumber: regNo, subjectCode: selectedSubject || "SCANNED", semester: currentSem, grade: mark >= 50 ? "PASS" : "FAIL", result: mark >= 50 ? "PASS" : "FAIL", mark: String(mark), department: currentDept }); } } }); if (finalPayload.length === 0) { alert("⚠️ Could not find valid Register Numbers and Marks in the text."); return; } if(!confirm(`📢 SCANNED UPLOAD:\nFound ${finalPayload.length} valid students.\nClick OK to upload directly to Drafts.`)) return; apiPost("/api/import/results", finalPayload).then((success) => { if(success) { setShowOcrModal(false); setTimeout(() => handlePreview(currentSem, currentDept), 1500); } }); };
   const handleManualSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ You uploaded a PDF. Please change the Dropdown above to 'Native PDF' instead of 'AI Smart Scan'!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowManualOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setManualOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted grades below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear."); setShowManualOcrModal(false); } setLoading(false); };
@@ -236,13 +293,242 @@ export default function AdminDashboard({ onLogout }) {
     setLoading(false);
   };
 
+  // --- NEW: HALL TICKET GENERATOR LOGIC ---
+  const handleGenerateHallTickets = async () => {
+     if(!htDept || !htSem) return alert("Select Dept and Semester");
+     setIsGeneratingHT(true);
+     setGeneratedTickets([]);
+     setMessage("🔍 Fetching subjects and student records...");
+
+     try {
+         // 1. Fetch all subjects for the targeted semester
+         const types = ["THEORY", "PRACTICAL", "INTEGRATED"];
+         let currentSemSubjects = [];
+         for(let t of types) {
+             const r = await fetch(`${API_BASE}/api/import/fetch-subjects?department=${htDept}&semester=${htSem}&paperType=${t}`);
+             if(r.ok) {
+                 const data = await r.json();
+                 currentSemSubjects = [...currentSemSubjects, ...data];
+             }
+         }
+
+         // 2. Fetch all students to find who is in this dept/sem
+         const stdRes = await fetch(`${API_BASE}/api/import/logins`);
+         if(!stdRes.ok) throw new Error("Could not fetch students");
+         const allStudents = await stdRes.json();
+         const targetYear = Math.ceil(Number(htSem) / 2);
+         const targetStudents = allStudents.filter(u => u.department === htDept && (Number(u.year) || Math.ceil(Number(u.semester) / 2)) === targetYear && u.role === 'student');
+
+         if(targetStudents.length === 0) {
+             setIsGeneratingHT(false);
+             return setMessage(`⚠️ No students found in ${htDept} Semester ${htSem}.`);
+         }
+
+         setMessage(`⚙️ Analyzing past arrears for ${targetStudents.length} students...`);
+
+         // 3. For each student, get profile and calculate arrears
+         const tickets = [];
+         for(let s of targetStudents) {
+             let arrears = [];
+             try {
+                 const profRes = await fetch(`${API_BASE}/api/students/${s.registerNumber}/profile`);
+                 if(profRes.ok) {
+                     const profData = await profRes.json();
+                     const mergedResults = mergeResults(profData.results || []);
+                     arrears = mergedResults.filter(r => 
+                         ["U", "RA", "AB", "FAIL", "F", "ABSENT", "WH", "SA"].includes(r.grade?.toUpperCase()) 
+                         && Number(r.semester) !== Number(htSem)
+                     );
+                 }
+             } catch(e) { console.warn(`Could not fetch profile for ${s.registerNumber}`); }
+
+             tickets.push({ student: s, currentSubjects: currentSemSubjects, arrears: arrears });
+         }
+
+         setGeneratedTickets(tickets);
+         setMessage(`✅ Successfully generated ${tickets.length} Hall Tickets.`);
+     } catch(err) {
+         setMessage(`❌ Error generating Hall Tickets: ${err.message}`);
+     }
+     setIsGeneratingHT(false);
+  };
+
+  const getBranchName = (deptCode) => {
+     if (deptCode === "CSE") return "B.E. Computer Science and Engineering";
+     if (deptCode === "ECE") return "B.E. Electronics and Communication Engineering";
+     if (deptCode === "EEE") return "B.E. Electrical and Electronics Engineering";
+     if (deptCode === "BIO TECH") return "B.Tech. Biotechnology";
+     if (deptCode === "MECH") return "B.E. Mechanical Engineering";
+     if (deptCode === "AIDS") return "B.Tech. Artificial Intelligence and Data Science";
+     if (deptCode === "AERO") return "B.E. Aeronautical Engineering";
+     if (deptCode === "CIVIL") return "B.E. Civil Engineering";
+     if (deptCode === "CHEM") return "B.Tech. Chemical Engineering";
+     if (deptCode === "CSBS") return "B.E. Computer Science and Business Systems";
+     if (deptCode === "BIO MEDICINE") return "B.E. Biomedical Engineering";
+     if (deptCode === "IT") return "B.Tech. Information Technology";
+     return `B.E. ${deptCode}`;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
-      <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0"><h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">🎓 SPCET Admin</h1><button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button></header>
-      <main className="flex-1 max-w-[1500px] mx-auto w-full p-6">
+      
+      {/* 🖨️ THE HIDDEN PRINTABLE A4 HALL TICKET AREA */}
+      {generatedTickets.length > 0 && (
+         <div className="hidden print:block print:absolute print:inset-0 print:bg-white print:z-[9999] text-black bg-white w-full">
+            {generatedTickets.map((ticket, index) => {
+               // Combine all subjects for the table
+               const allDisplaySubjects = [
+                  ...ticket.currentSubjects.map(sub => ({ sem: htSem, code: sub.subjectCode, title: sub.subjectName })),
+                  ...ticket.arrears.map(arr => ({ sem: arr.semester, code: arr.subjectCode || arr.subject, title: "ARREAR SUBJECT" }))
+               ];
+               
+               // Split into left and right columns
+               const midpoint = Math.ceil(allDisplaySubjects.length / 2);
+               const leftCol = allDisplaySubjects.slice(0, midpoint);
+               const rightCol = allDisplaySubjects.slice(midpoint);
+
+               return (
+                 <div key={ticket.student.registerNumber} className="print:w-[210mm] print:h-[297mm] p-6 mx-auto box-border" style={{ pageBreakAfter: "always" }}>
+                    <div className="border-[3px] border-black p-1 h-full flex flex-col relative">
+                       
+                       {/* Header row */}
+                       <div className="flex border-b-[3px] border-black">
+                          <div className="w-32 flex justify-center items-center p-2 border-r-[3px] border-black">
+                             <div className="w-20 h-20 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-bold text-center">ANNA<br/>UNIV<br/>LOGO</div>
+                          </div>
+                          <div className="flex-1 flex flex-col items-center justify-center text-center p-2">
+                             <h1 className="text-2xl font-bold uppercase tracking-widest">Anna University</h1>
+                             <p className="text-sm font-bold uppercase tracking-wider">Chennai - 600 025</p>
+                             <p className="text-sm font-medium mt-2">UNIVERSITY EXAMINATIONS - {htSession}</p>
+                             <p className="text-lg font-bold mt-1 tracking-widest">HALL TICKET</p>
+                          </div>
+                          
+                          {/* ✅ NEW: DATABASE PHOTO FETCHING */}
+                          <div className="w-32 border-l-[3px] border-black flex flex-col items-center justify-center p-2 bg-white">
+                             <div className="w-24 h-28 border border-gray-400 flex items-center justify-center overflow-hidden bg-gray-50 relative">
+                                <img 
+                                  src={`${API_BASE}/api/students/${ticket.student.registerNumber}/photo?t=${ticket.student.photoUpdateTs || ''}`} 
+                                  alt={ticket.student.registerNumber}
+                                  className="w-full h-full object-cover absolute inset-0 z-10"
+                                  onError={(e) => {
+                                     e.target.onerror = null; 
+                                     e.target.style.display = 'none'; 
+                                  }}
+                                />
+                                <span className="text-[10px] text-gray-400 text-center px-2">Photo Missing</span>
+                             </div>
+                          </div>
+                       </div>
+
+                       {/* Info Grid */}
+                       <div className="flex border-b-[3px] border-black text-sm">
+                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Register Number</div>
+                          <div className="flex-1 p-2 font-bold border-r-[3px] border-black flex items-center tracking-widest">{ticket.student.registerNumber}</div>
+                          <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">Current Semester</div>
+                          <div className="w-16 p-2 font-bold flex items-center justify-center">{String(htSem).padStart(2, '0')}</div>
+                       </div>
+
+                       <div className="flex border-b-[3px] border-black text-sm">
+                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Name</div>
+                          <div className="flex-1 p-2 font-bold uppercase border-r-[3px] border-black flex items-center">{ticket.student.name}</div>
+                          <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">D.O.B</div>
+                          <div className="w-32 p-2 font-bold flex items-center whitespace-nowrap">
+                             {ticket.student.password && ticket.student.password.includes("-") ? ticket.student.password : "-"}
+                          </div>
+                       </div>
+
+                       <div className="flex border-b-[3px] border-black text-sm">
+                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Degree & Branch</div>
+                          <div className="flex-1 p-2 font-bold uppercase flex items-center">{getBranchName(htDept)}</div>
+                       </div>
+
+                       <div className="flex border-b-[3px] border-black text-sm">
+                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Examination Centre</div>
+                          <div className="flex-1 p-2 font-bold uppercase flex items-center">{htCentre}</div>
+                       </div>
+
+                       {/* Subjects Table Area */}
+                       <div className="flex flex-1 border-b-[3px] border-black">
+                          {/* Left Column */}
+                          <div className="flex-1 border-r-[3px] border-black flex flex-col">
+                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1">
+                                <div className="w-10 text-center">Sem</div>
+                                <div className="w-20 text-center">Sub Code</div>
+                                <div className="flex-1 pl-2">Subject Title</div>
+                             </div>
+                             <div className="p-2 space-y-3">
+                                {leftCol.map((sub, i) => (
+                                   <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
+                                      <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
+                                      <div className="w-20 text-center">{sub.code}</div>
+                                      <div className="flex-1 pl-2">{sub.title}</div>
+                                   </div>
+                                ))}
+                             </div>
+                             <div className="mt-auto p-4 font-bold text-sm">
+                                No of Subjects Registered: {allDisplaySubjects.length}
+                             </div>
+                          </div>
+                          
+                          {/* Right Column */}
+                          <div className="flex-1 flex flex-col">
+                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1">
+                                <div className="w-10 text-center">Sem</div>
+                                <div className="w-20 text-center">Sub Code</div>
+                                <div className="flex-1 pl-2">Subject Title</div>
+                             </div>
+                             <div className="p-2 space-y-3">
+                                {rightCol.map((sub, i) => (
+                                   <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
+                                      <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
+                                      <div className="w-20 text-center">{sub.code}</div>
+                                      <div className="flex-1 pl-2">{sub.title}</div>
+                                   </div>
+                                ))}
+                             </div>
+                          </div>
+                       </div>
+
+                       {/* Footer / Notes */}
+                       <div className="p-2 text-[10px] flex-1">
+                          <p className="font-bold mb-1">NOTE :</p>
+                          <div className="whitespace-pre-line leading-tight ml-4 pl-4" style={{textIndent: "-1rem"}}>{htNotes}</div>
+                       </div>
+
+                       {/* Signatures */}
+                       <div className="flex border-t-[3px] border-black h-24 relative">
+                          <div className="absolute top-2 left-2 text-[10px] font-bold">Generated on: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                          
+                          <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500">
+                             Signature of the Candidate
+                          </div>
+                          <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500 relative">
+                             {/* Placeholder seal */}
+                             <div className="absolute top-2 right-2 w-12 h-12 rounded-full border border-gray-400 flex items-center justify-center text-[6px] text-center text-gray-400 opacity-50 transform -rotate-12">SEAL</div>
+                             Signature of the Principal with seal
+                          </div>
+                          <div className="flex-1 flex items-end justify-center pb-2 text-xs text-gray-500 relative">
+                             {/* Fake signature */}
+                             <div className="absolute bottom-8 right-10 text-black font-serif text-2xl opacity-80 transform -rotate-6">Controller</div>
+                             Controller of Examinations
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+               );
+            })}
+         </div>
+      )}
+
+      <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0 print:hidden">
+        <h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">🎓 SPCET Admin</h1>
+        <button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button>
+      </header>
+      
+      <main className="flex-1 max-w-[1500px] mx-auto w-full p-6 print:hidden">
         
         {/* TAB NAVIGATION */}
-        <div className="flex gap-4 border-b border-gray-200 mb-6 overflow-x-auto">
+        <div className="flex gap-4 border-b border-gray-200 mb-6 overflow-x-auto print:hidden">
           <button onClick={() => setActiveTab("qpapers")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "qpapers" ? "border-b-2 border-purple-600 text-purple-700" : "text-gray-500 hover:text-purple-700"}`}>1. Question Papers</button>
           <button onClick={() => setActiveTab("setup")} className={`pb-2 px-4 font-medium transition-colors ${activeTab === "setup" ? "border-b-2 border-indigo-600 text-indigo-600" : "text-gray-500"}`}>2. Setup</button>
           <button onClick={() => setActiveTab("excel")} className={`pb-2 px-4 font-medium transition-colors ${activeTab === "excel" ? "border-b-2 border-indigo-600 text-indigo-600" : "text-gray-500"}`}>3. Excel Uploads</button>
@@ -250,12 +536,147 @@ export default function AdminDashboard({ onLogout }) {
           <button onClick={() => setActiveTab("process")} className={`pb-2 px-4 font-medium transition-colors ${activeTab === "process" ? "border-b-2 border-indigo-600 text-indigo-600" : "text-gray-500"}`}>5. Calculate</button>
           <button onClick={() => setActiveTab("manual")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "manual" ? "border-b-2 border-orange-500 text-orange-600" : "text-gray-500 hover:text-orange-600"}`}>6. Final Override</button>
           <button onClick={() => setActiveTab("manage")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "manage" ? "border-b-2 border-red-600 text-red-600" : "text-gray-500 hover:text-red-600"}`}>7. Manage Live</button>
-          <button onClick={() => setActiveTab("gpa")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "gpa" ? "border-b-2 border-indigo-600 text-indigo-700" : "text-gray-500 hover:text-indigo-700"}`}>8. GPA Calc</button>
-          <button onClick={() => setActiveTab("settings")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "settings" ? "border-b-2 border-gray-800 text-gray-800" : "text-gray-500 hover:text-gray-800"}`}>9. Settings</button>
+          <button onClick={() => setActiveTab("halltickets")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "halltickets" ? "border-b-2 border-pink-600 text-pink-700" : "text-gray-500 hover:text-pink-700"}`}>8. Hall Tickets</button>
+          <button onClick={() => setActiveTab("gpa")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "gpa" ? "border-b-2 border-indigo-600 text-indigo-700" : "text-gray-500 hover:text-indigo-700"}`}>9. GPA Calc</button>
+          <button onClick={() => setActiveTab("settings")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "settings" ? "border-b-2 border-gray-800 text-gray-800" : "text-gray-500 hover:text-gray-800"}`}>10. Settings</button>
+          
+          {/* NEW: PROFILES TAB */}
+          <button onClick={() => setActiveTab("profiles")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "profiles" ? "border-b-2 border-blue-600 text-blue-700" : "text-gray-500 hover:text-blue-700"}`}>11. Profiles</button>
         </div>
 
         <AnimatePresence>{message && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`p-4 rounded-md mb-6 text-sm font-medium shadow-sm ${message.startsWith("✅") || message.startsWith("🎉") ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>{message}</motion.div>}</AnimatePresence>
         
+        {/* NEW: PROFILES VIEW */}
+        {activeTab === "profiles" && (
+           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                 <div className="flex justify-between items-center mb-6">
+                    <div>
+                       <h2 className="text-xl font-bold text-gray-800">Student Profiles & Photos</h2>
+                       <p className="text-sm text-gray-500">Upload profile pictures for Hall Tickets. Images are saved directly to the database.</p>
+                    </div>
+                    <input 
+                      type="text" 
+                      placeholder="Search Register No..." 
+                      value={profileSearch}
+                      onChange={e => setProfileSearch(e.target.value)}
+                      className="p-2 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                 </div>
+
+                 <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-sm text-left">
+                       <thead className="bg-gray-100 text-gray-600 uppercase text-xs font-bold">
+                          <tr>
+                             <th className="px-4 py-3 w-20 text-center">Photo</th>
+                             <th className="px-4 py-3">Register No</th>
+                             <th className="px-4 py-3">Name</th>
+                             <th className="px-4 py-3">Dept</th>
+                             <th className="px-4 py-3">Sem</th>
+                             <th className="px-4 py-3 w-48">Action</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100">
+                          {profileStudents
+                             .filter(s => s.registerNumber.includes(profileSearch.toUpperCase()))
+                             .map(student => (
+                             <tr key={student.registerNumber} className="hover:bg-gray-50 items-center">
+                                <td className="px-4 py-2 flex justify-center">
+                                   <div className="w-12 h-14 bg-gray-200 border border-gray-300 rounded overflow-hidden relative flex items-center justify-center">
+                                      <img 
+                                        src={`${API_BASE}/api/students/${student.registerNumber}/photo?t=${student.photoUpdateTs || ''}`}
+                                        alt="profile"
+                                        className="w-full h-full object-cover absolute inset-0 z-10"
+                                        onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                                      />
+                                      <span className="text-[8px] text-gray-400">None</span>
+                                   </div>
+                                </td>
+                                <td className="px-4 py-3 font-mono font-bold text-gray-800">{student.registerNumber}</td>
+                                <td className="px-4 py-3 text-gray-700">{student.name}</td>
+                                <td className="px-4 py-3 text-gray-600">{student.department}</td>
+                                <td className="px-4 py-3 text-gray-600">{student.semester}</td>
+                                <td className="px-4 py-3">
+                                   <label className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-bold py-1.5 px-3 rounded text-xs cursor-pointer inline-block transition-colors">
+                                      Upload Photo
+                                      <input 
+                                         type="file" 
+                                         accept="image/*" 
+                                         className="hidden" 
+                                         onChange={(e) => handlePhotoUpload(student.registerNumber, e)}
+                                      />
+                                   </label>
+                                </td>
+                             </tr>
+                          ))}
+                       </tbody>
+                    </table>
+                    {profileStudents.length === 0 && (
+                       <div className="p-8 text-center text-gray-500">No students found. Go to Setup tab and upload logins first.</div>
+                    )}
+                 </div>
+              </div>
+           </motion.div>
+        )}
+
+        {/* HALL TICKETS VIEW */}
+        {activeTab === "halltickets" && (
+           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+              <div className="bg-pink-50 p-6 rounded-xl shadow-sm border border-pink-200">
+                 <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold text-pink-800">Automated Hall Ticket Generator</h2>
+                    <span className="bg-pink-200 text-pink-800 text-xs font-bold px-3 py-1 rounded shadow-sm">With Arrear Support</span>
+                 </div>
+                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div><label className="block text-xs font-bold text-pink-700 uppercase mb-2">Target Dept</label><select value={htDept} onChange={(e) => setHtDept(e.target.value)} className="w-full p-2.5 border border-pink-300 rounded-lg font-bold text-gray-700 bg-white outline-none focus:ring-2 focus:ring-pink-500">{DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+                    <div><label className="block text-xs font-bold text-pink-700 uppercase mb-2">Semester</label><select value={htSem} onChange={(e) => setHtSem(e.target.value)} className="w-full p-2.5 border border-pink-300 rounded-lg font-bold text-gray-700 bg-white outline-none focus:ring-2 focus:ring-pink-500">{[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>{`Semester ${n}`}</option>)}</select></div>
+                 </div>
+                 <button onClick={handleGenerateHallTickets} disabled={isGeneratingHT} className="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors active:scale-95 flex justify-center items-center gap-2 disabled:bg-gray-400">
+                    <span>{isGeneratingHT ? "⚙️" : "🖨️"}</span> {isGeneratingHT ? "Generating Tickets..." : "Generate Preview Data"}
+                 </button>
+              </div>
+
+              {/* Template Builder Settings */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                 <h3 className="font-bold text-gray-700 mb-4 border-b pb-2">Template Builder Settings</h3>
+                 <div className="space-y-4">
+                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Exam Session Header</label><input type="text" value={htSession} onChange={e=>setHtSession(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-bold text-gray-700" /></div>
+                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Examination Centre Name</label><input type="text" value={htCentre} onChange={e=>setHtCentre(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-bold text-gray-700 uppercase" /></div>
+                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Instructions / Notes (Bottom Left)</label><textarea value={htNotes} onChange={e=>setHtNotes(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-mono h-24" /></div>
+                 </div>
+              </div>
+
+              {/* Preview Table */}
+              {generatedTickets.length > 0 && (
+                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                       <h3 className="font-bold text-gray-700">Preview: {generatedTickets.length} Students</h3>
+                       <button onClick={() => window.print()} className="bg-gray-800 text-white font-bold py-2 px-4 rounded shadow-sm hover:bg-gray-900 transition-colors">🖨️ Print All to PDF</button>
+                    </div>
+                    <div className="max-h-[400px] overflow-y-auto">
+                       <table className="w-full text-sm text-left">
+                          <thead className="bg-gray-100 text-gray-600 uppercase text-xs font-bold sticky top-0">
+                             <tr><th className="px-4 py-3">Register No</th><th className="px-4 py-3">Name</th><th className="px-4 py-3 text-center">Current Subjects</th><th className="px-4 py-3 text-center">Arrears Found</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                             {generatedTickets.map((t, i) => (
+                                <tr key={i} className="hover:bg-gray-50">
+                                   <td className="px-4 py-3 font-mono font-bold text-gray-800">{t.student.registerNumber}</td>
+                                   <td className="px-4 py-3 text-gray-600 font-medium">{t.student.name}</td>
+                                   <td className="px-4 py-3 text-center font-bold text-blue-600">{t.currentSubjects.length}</td>
+                                   <td className="px-4 py-3 text-center">
+                                      <span className={`px-2 py-1 rounded text-xs font-bold ${t.arrears.length > 0 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{t.arrears.length}</span>
+                                   </td>
+                                </tr>
+                             ))}
+                          </tbody>
+                       </table>
+                    </div>
+                 </div>
+              )}
+           </motion.div>
+        )}
+
         {/* SETTINGS VIEW */}
         {activeTab === "settings" && (
            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -309,7 +730,6 @@ export default function AdminDashboard({ onLogout }) {
             {uploadFormat === "EXCEL" && (<div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-lg font-bold mb-4 text-gray-800">Upload External Marks (Excel)</h2><p className="text-sm text-gray-500 mb-4">Upload the final university external marks sheet.</p><input type="file" onChange={handleExternalUpload} accept=".xlsx, .csv" className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-teal-50 file:text-teal-700" /></div>)}
         </motion.div>)}
         
-        {/* 3. LIVE GRID ENTRY TAB */}
         {activeTab === "grid" && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
             <div className="bg-green-50 p-8 rounded-xl shadow-sm border border-green-200">
               <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold text-green-800">Live Grid Data Entry</h2><span className="bg-green-200 text-green-800 text-xs font-bold px-3 py-1 rounded shadow-sm">Excel Generator Backend</span></div>
@@ -425,7 +845,7 @@ export default function AdminDashboard({ onLogout }) {
         {/* 6. MANAGE LIVE */}
         {activeTab === "manage" && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6"><div className="bg-red-50 p-8 rounded-xl shadow-sm border border-red-200"><div className="flex justify-between items-center mb-4"><h2 className="text-xl font-bold text-red-800">Manage Published Results</h2><span className="bg-red-200 text-red-800 text-xs font-bold px-3 py-1 rounded-full shadow-sm">Live Mode</span></div><p className="text-red-700 text-sm mb-6 font-medium">Use this section to completely remove results that are currently visible to Students and HODs.</p><div className="grid grid-cols-2 gap-6 mb-8"><div><label className="block text-xs font-bold text-red-700 uppercase mb-2">Target Department</label><select value={calcDept} onChange={(e) => setCalcDept(e.target.value)} className="w-full p-3 border border-red-300 rounded-lg font-bold text-gray-700 bg-white outline-none">{DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}</select></div><div><label className="block text-xs font-bold text-red-700 uppercase mb-2">Target Semester</label><select value={calcSem} onChange={(e) => setCalcSem(e.target.value)} className="w-full p-3 border border-red-300 rounded-lg font-bold text-gray-700 bg-white outline-none">{[1, 2, 3, 4, 5, 6, 7, 8, 99].map(n => <option key={n} value={n}>{n === 99 ? "Graduated 🎓" : `Semester ${n}`}</option>)}</select></div></div><button onClick={() => handleUnpublishLive(calcSem, calcDept)} className="w-full bg-red-600 text-white font-bold py-4 rounded-lg hover:bg-red-700 shadow-lg transition-all active:scale-95 flex justify-center items-center gap-2 text-lg"><span>🚨</span> Unpublish & Drop Live Results</button></div></motion.div>)}
         
-        {/* 7. ADMIN QUESTION PAPERS BANK */}
+        {/* 7. ADMIN QUESTION PAPERS BANK & REQUISITIONS */}
         {activeTab === "qpapers" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
             
@@ -594,347 +1014,81 @@ export default function AdminDashboard({ onLogout }) {
 
           </motion.div>
         )}
-      </main>
-    </div>
-  );
-}
 
-/* -------------------- FACULTY DASHBOARD -------------------- */
-function FacultyDashboard({ user, onLogout }) {
-  const [view, setView] = useState("tasks"); 
-  const [templateType, setTemplateType] = useState(1);
-  const [myReqs, setMyReqs] = useState([]);
-  const [activeTask, setActiveTask] = useState(null); 
+        {/* NEW: PROFILES TAB */}
+        {activeTab === "profiles" && (
+           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                 <div className="flex justify-between items-center mb-6">
+                    <div>
+                       <h2 className="text-xl font-bold text-gray-800">Student Profiles & Photos</h2>
+                       <p className="text-sm text-gray-500">Upload profile pictures for Hall Tickets. Images are saved directly to the database.</p>
+                    </div>
+                    <input 
+                      type="text" 
+                      placeholder="Search Register No..." 
+                      value={profileSearch}
+                      onChange={e => setProfileSearch(e.target.value)}
+                      className="p-2 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                 </div>
 
-  const [header, setHeader] = useState({ examSession: "B.E / B.Tech Degree Examinations", semesters: "", department: user?.department || "CSE", subject: "", regulations: "(Regulations 2021)", requirements: "Nil" });
-  const [partA, setPartA] = useState(Array.from({ length: 10 }, (_, i) => ({ qNo: i + 1, question: "", btl: "K1", co: "CO1" })));
-  const [partB, setPartB] = useState(Array.from({ length: 5 }, (_, i) => ({ qNo: i + 11, a: { question: "", btl: "K2", co: `CO${i+1}`, marks: "13" }, b: { question: "", btl: "K2", co: `CO${i+1}`, marks: "13" } })));
-  const [partC, setPartC] = useState({ qNo: 16, a: { question: "", btl: "K4", co: "CO5", marks: "15" }, b: { question: "", btl: "K4", co: "CO5", marks: "15" } });
-  const [customContent, setCustomContent] = useState("");
-
-  const [unitHeader, setUnitHeader] = useState({ examSession: "BE - DEGREE EXAMINATIONS", semesterWord: "", department: "DEPARTMENT OF " + (user?.department || "CSE"), subject: "", regulations: "(Regulations 2021)", duration: "2 Hours", maxMarks: "50" });
-  const [unitPartA, setUnitPartA] = useState(Array.from({ length: 5 }, (_, i) => ({ qNo: i + 1, question: "", kLevel: "K1", co: "CO1" })));
-  const [unitPartB, setUnitPartB] = useState(Array.from({ length: 3 }, (_, i) => ({ qNo: i + 6, question: "", marks: "13", kLevel: "K2", co: "CO2" })));
-  const [unitPartC, setUnitPartC] = useState([{ qNo: 9, question: "", marks: "14", kLevel: "K4", co: "CO3" }]);
-  const [coDist, setCoDist] = useState({ marks: ['-','63','-','-','-','-'], perc: ['-','100','-','-','-','-'] });
-
-  // CLAIM FORM STATE matching Google Form
-  const [claimForm, setClaimForm] = useState({
-     facultyName: user?.name || "", 
-     designation: "", 
-     collegeNameCode: "", 
-     qpDept: "", 
-     examinerDept: user?.department || "", 
-     mobile: "", 
-     email: "",
-     subjectCode: "", 
-     subjectName: "", 
-     qpType: "1 with key", 
-     semesterAndReg: "", 
-     amountClaimed: "", 
-     mailedConfirmation: false,
-     accountNo: "", 
-     bankName: "", 
-     branchName: "", 
-     ifsc: "",
-     aicteId: "",
-     pan: "",
-     address: ""
-  });
-  const [passbookFiles, setPassbookFiles] = useState(null); 
-  const [scannedClaimFile, setScannedClaimFile] = useState(null); 
-  const [answerKeyFile, setAnswerKeyFile] = useState(null);
-  const [submittingDetails, setSubmittingDetails] = useState(false);
-
-  useEffect(() => {
-    fetch(`${API_BASE}/api/requisitions/faculty/${user.registerNumber}`)
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setMyReqs(Array.isArray(data) ? data : []))
-      .catch(() => setMyReqs([]));
-  }, [user.registerNumber]);
-
-  useEffect(() => {
-      if(activeTask) {
-          setClaimForm(prev => ({
-              ...prev,
-              subjectCode: activeTask.subjectCode,
-              subjectName: activeTask.courseTitle
-          }));
-      }
-  }, [activeTask]);
-
-  const handleUpdateReqStatus = async (id, newStatus) => {
-    try {
-      await fetch(`${API_BASE}/api/requisitions/${id}/status`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: newStatus }) });
-      setMyReqs(myReqs.map(r => r.id === id ? { ...r, status: newStatus } : r));
-    } catch(err) { alert("Failed to update status"); }
-  };
-
-  const handleSubmitClaimForm = async () => {
-    if(!claimForm.accountNo || !claimForm.ifsc || !claimForm.pan) return alert("Please fill all mandatory fields (PAN, Account No, IFSC).");
-    if(!claimForm.mailedConfirmation) return alert("You must check the box confirming you mailed the documents to coeqp@spcet.ac.in");
-    
-    setSubmittingDetails(true);
-    let autoCalcTotal = 0;
-    if (claimForm.qpType === "1 with key") autoCalcTotal = 750 + 500;
-    if (claimForm.qpType === "2 with key") autoCalcTotal = (750 * 2) + (500 * 2);
-    
-    const payload = { 
-        ...claimForm, 
-        totalAmount: autoCalcTotal.toString() 
-    };
-
-    try {
-      await fetch(`${API_BASE}/api/requisitions/${activeTask.id}/details`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      await handleUpdateReqStatus(activeTask.id, "READY");
-    } catch(err) { alert("Failed to save claim details"); }
-    setSubmittingDetails(false);
-  };
-
-  const startGenerating = (task) => {
-    setActiveTask(task);
-    if(task.examType === "UNIT_TEST") {
-       setUnitHeader({...unitHeader, subject: task.subjectCode, department: task.department});
-       setView("unit");
-    } else {
-       setHeader({...header, subject: task.subjectCode, department: task.department});
-       setView("semester");
-    }
-  };
-
-  const handleGenerateWord = async () => {
-    const config = { header, partA, partB, partC, customContent };
-    await exportSemesterPaperDocx(config, templateType);
-    try { 
-      await fetch(`${API_BASE}/api/import/save-question-paper`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subjectCode: header.subject, department: header.department, examSession: header.examSession, hasPartC: templateType === 1, examType: "SEMESTER", facultyName: user.name, paperData: JSON.stringify(config) }) }); 
-      if(activeTask) await handleUpdateReqStatus(activeTask.id, "SUBMITTED");
-      alert("✅ Document downloaded and sent to Admin Portal!");
-      setView("tasks");
-    } catch(err) { console.warn(err); }
-  };
-
-  const handleGenerateUnitWord = async () => {
-    const config = { unitHeader, unitPartA, unitPartB, unitPartC, coDistribution: { marks: coDist.marks, percentage: coDist.perc } };
-    await exportUnitTestPaperDocx(config);
-    try {
-      await fetch(`${API_BASE}/api/import/save-question-paper`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subjectCode: unitHeader.subject, department: unitHeader.department, examSession: unitHeader.examSession, hasPartC: false, examType: "UNIT_TEST", facultyName: user.name, paperData: JSON.stringify(config) }) });
-      if(activeTask) await handleUpdateReqStatus(activeTask.id, "SUBMITTED");
-      alert("✅ Unit Test Document downloaded and sent to Admin Portal!");
-      setView("tasks");
-    } catch(err) { console.warn(err); }
-  };
-
-  const handleDocxUpload = async (e) => {
-    const file = e.target.files[0]; if (!file) return;
-    try { const arrayBuffer = await file.arrayBuffer(); const result = await mammoth.extractRawText({ arrayBuffer }); setCustomContent(result.value); alert("✅ Document text successfully extracted!"); } 
-    catch (err) { alert("❌ Failed to read DOCX file. Make sure it is a valid Word Document."); }
-  };
-
-  if (view === "tasks") {
-    const pendingTasks = myReqs.filter(r => r.status === "PENDING" || r.status === "ACCEPTED" || r.status === "READY");
-    
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
-        <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0"><h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">👨‍🏫 Faculty Portal</h1><div className="flex items-center gap-4"><button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button></div></header>
-        <main className="flex-1 max-w-5xl mx-auto w-full p-6">
-           <h2 className="text-2xl font-bold text-slate-800 mb-6">My Official Tasks</h2>
-           
-           {pendingTasks.length === 0 ? (
-              <div className="bg-white p-10 rounded-xl shadow-sm border border-gray-200 text-center text-gray-500">You have no pending question paper requests from the Admin.</div>
-           ) : (
-              <div className="space-y-6">
-                 {pendingTasks.map(task => {
-                    const isUrgent = new Date(task.deadline).getTime() - new Date().getTime() < (3 * 24 * 60 * 60 * 1000); 
-                    
-                    return (
-                      <div key={task.id} className={`bg-white p-6 rounded-xl shadow-sm border-l-4 ${isUrgent ? 'border-l-red-500' : 'border-l-indigo-500'} border border-gray-200`}>
-                         <div className="flex justify-between items-start mb-4">
-                            <div>
-                               <div className="flex items-center gap-2 mb-1">
-                                  <span className="bg-gray-100 text-gray-600 text-[10px] font-bold uppercase px-2 py-0.5 rounded">{task.examType.replace('_', ' ')}</span>
-                                  {isUrgent && <span className="bg-red-100 text-red-700 text-[10px] font-bold uppercase px-2 py-0.5 rounded flex items-center gap-1">⚠️ Urgent</span>}
-                               </div>
-                               <h3 className="text-xl font-bold text-gray-800">{task.subjectCode} - {task.courseTitle}</h3>
-                               <p className="text-sm text-gray-500">{task.department} - Semester {task.semester} (Appt: {task.appointmentLetterNo})</p>
-                            </div>
-                            <div className="text-right">
-                               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Deadline</p>
-                               <p className={`font-bold ${isUrgent ? 'text-red-600' : 'text-gray-700'}`}>{task.deadline}</p>
-                            </div>
-                         </div>
-                         
-                         {task.status === "PENDING" && (
-                            <div className="flex gap-3 mt-4 border-t pt-4">
-                               <button onClick={() => { setActiveTask(task); handleUpdateReqStatus(task.id, "ACCEPTED"); }} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow-sm transition-transform active:scale-95">Accept Request</button>
-                               <button onClick={() => handleUpdateReqStatus(task.id, "REJECTED")} className="bg-white border border-red-200 text-red-500 hover:bg-red-50 font-bold py-2 px-6 rounded-lg transition-colors">Decline</button>
-                            </div>
-                         )}
-
-                         {task.status === "ACCEPTED" && activeTask?.id === task.id && (
-                            <div className="mt-4 border-t pt-4 bg-slate-50 -mx-6 -mb-6 p-6 rounded-b-xl border-t-gray-200">
-                               <h4 className="font-bold text-indigo-800 mb-4 text-lg">Official Claim Form & Details</h4>
-                               <p className="text-xs text-gray-600 mb-6">Please complete this form to process your remuneration. This must be filled before the generator unlocks.</p>
-                               
-                               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Name (As per Bank A/c) *</label><input type="text" value={claimForm.facultyName} onChange={e=>setClaimForm({...claimForm, facultyName: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Designation *</label><input type="text" value={claimForm.designation} onChange={e=>setClaimForm({...claimForm, designation: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">College Name & Code *</label><input type="text" value={claimForm.collegeNameCode} onChange={e=>setClaimForm({...claimForm, collegeNameCode: e.target.value})} placeholder="e.g. SPCET (1127)" className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Dept for QP Setting *</label><input type="text" value={claimForm.qpDept} onChange={e=>setClaimForm({...claimForm, qpDept: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Department of Examiner *</label><input type="text" value={claimForm.examinerDept} onChange={e=>setClaimForm({...claimForm, examinerDept: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Mobile Number *</label><input type="text" value={claimForm.mobile} onChange={e=>setClaimForm({...claimForm, mobile: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Email ID *</label><input type="email" value={claimForm.email} onChange={e=>setClaimForm({...claimForm, email: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Subject Code *</label><input type="text" value={claimForm.subjectCode} readOnly className="w-full p-2 border rounded bg-gray-100 outline-none text-sm font-bold text-gray-600" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Name of the Subject *</label><input type="text" value={claimForm.subjectName} readOnly className="w-full p-2 border rounded bg-gray-100 outline-none text-sm font-bold text-gray-600" /></div>
-                                  
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Semester and Regulation *</label><input type="text" value={claimForm.semesterAndReg} onChange={e=>setClaimForm({...claimForm, semesterAndReg: e.target.value})} placeholder="e.g. Sem 3 (Reg 2021)" className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">AICTE / Anna Univ ID</label><input type="text" value={claimForm.aicteId} onChange={e=>setClaimForm({...claimForm, aicteId: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">PAN Number *</label><input type="text" value={claimForm.pan} onChange={e=>setClaimForm({...claimForm, pan: e.target.value})} className="w-full p-2 border rounded outline-none text-sm font-mono uppercase" /></div>
-                                  <div className="col-span-1 md:col-span-3"><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Official College Address *</label><input type="text" value={claimForm.address} onChange={e=>setClaimForm({...claimForm, address: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                               </div>
-
-                               <h5 className="font-bold text-gray-700 mb-3 border-b pb-1">Bank Details (As per Passbook)</h5>
-                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Bank Account No (Only Savings A/C) *</label><input type="text" value={claimForm.accountNo} onChange={e=>setClaimForm({...claimForm, accountNo: e.target.value})} className="w-full p-2 border rounded outline-none font-mono text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Bank Name *</label><input type="text" value={claimForm.bankName} onChange={e=>setClaimForm({...claimForm, bankName: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Branch *</label><input type="text" value={claimForm.branchName} onChange={e=>setClaimForm({...claimForm, branchName: e.target.value})} className="w-full p-2 border rounded outline-none text-sm" /></div>
-                                  <div><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">IFSC Code *</label><input type="text" value={claimForm.ifsc} onChange={e=>setClaimForm({...claimForm, ifsc: e.target.value})} className="w-full p-2 border rounded outline-none font-mono uppercase text-sm" /></div>
-                               </div>
-
-                               <h5 className="font-bold text-gray-700 mb-3 border-b pb-1">Remuneration & Confirmation</h5>
-                               <div className="bg-white p-4 rounded border border-gray-200 mb-6">
-                                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
-                                     <div className="flex-1 w-full">
-                                         <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">No of Question Paper *</label>
-                                         <select value={claimForm.qpType} onChange={e=>setClaimForm({...claimForm, qpType: e.target.value})} className="w-full p-2 border rounded outline-none text-sm font-bold text-indigo-700">
-                                            <option value="1 with key">1 with key</option>
-                                            <option value="2 with key">2 with key</option>
-                                            <option value="Others (QP Scrutiny)">Others (QP Scrutiny)</option>
-                                         </select>
-                                     </div>
-                                     <div className="flex-1 w-full">
-                                         <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Amount Claimed *</label>
-                                         <input type="number" value={claimForm.amountClaimed} onChange={e=>setClaimForm({...claimForm, amountClaimed: e.target.value})} placeholder="Rs." className="w-full p-2 border rounded outline-none text-sm font-bold text-green-700" />
-                                     </div>
-                                  </div>
-                                  
-                                  <div className="flex items-start gap-3 mt-4 p-3 bg-red-50 border border-red-200 rounded">
-                                      <input type="checkbox" checked={claimForm.mailedConfirmation} onChange={e=>setClaimForm({...claimForm, mailedConfirmation: e.target.checked})} className="mt-1 w-5 h-5 accent-red-600" id="mailCheck" />
-                                      <label htmlFor="mailCheck" className="text-xs text-red-800 font-medium">Question Paper with Answer Key, Claim Form, Front page of Bank pass book is Mailed to <span className="font-bold">coeqp@spcet.ac.in</span> (Mandatory for Claim upload readable bank pass book) * Yes</label>
-                                  </div>
-                               </div>
-
-                               <div className="grid grid-cols-1 gap-4 mb-6">
-                                  <div className="border border-dashed border-gray-300 p-4 rounded-lg bg-white">
-                                     <label className="block text-xs font-bold text-gray-700 mb-1">First Page of Bank Pass book with account details *</label>
-                                     <p className="text-[10px] text-gray-500 mb-2">Pls Make sure the readability of uploaded documents. Upload up to 5 supported files: PDF. Max 100 MB per file.</p>
-                                     <input type="file" multiple accept=".pdf" onChange={e => setPassbookFiles(e.target.files)} className="text-sm file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700" />
-                                  </div>
-                                  
-                                  <div className="border border-dashed border-gray-300 p-4 rounded-lg bg-white">
-                                     <label className="block text-xs font-bold text-gray-700 mb-1">Scanned Copy of Claim Form (Mandatory) *</label>
-                                     <p className="text-[10px] text-gray-500 mb-2">Upload 1 supported file: PDF. Max 10 MB.</p>
-                                     <input type="file" accept=".pdf" onChange={e => setScannedClaimFile(e.target.files[0])} className="text-sm file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700" />
-                                  </div>
-                               </div>
-
-                               <button onClick={handleSubmitClaimForm} disabled={submittingDetails} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 px-6 rounded shadow-md transition-transform active:scale-95 text-lg">Submit Official Claim & Unlock Generator</button>
-                            </div>
-                         )}
-
-                         {task.status === "READY" && (
-                            <div className="mt-4 border-t pt-4">
-                               <div className="bg-green-50 text-green-700 text-sm font-medium p-3 rounded mb-4 flex items-center gap-2">✅ Claim Form Submitted. Generator Unlocked.</div>
-                               <button onClick={() => startGenerating(task)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg shadow-md transition-transform active:scale-95 w-full flex justify-center items-center gap-2">
-                                  <span>⚙️</span> Open Question Paper Generator
-                               </button>
-                            </div>
-                         )}
-                      </div>
-                    );
-                 })}
+                 <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-sm text-left">
+                       <thead className="bg-gray-100 text-gray-600 uppercase text-xs font-bold">
+                          <tr>
+                             <th className="px-4 py-3 w-20 text-center">Photo</th>
+                             <th className="px-4 py-3">Register No</th>
+                             <th className="px-4 py-3">Name</th>
+                             <th className="px-4 py-3">Dept</th>
+                             <th className="px-4 py-3">Sem</th>
+                             <th className="px-4 py-3 w-48">Action</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100">
+                          {profileStudents
+                             .filter(s => s.registerNumber.includes(profileSearch.toUpperCase()))
+                             .map(student => (
+                             <tr key={student.registerNumber} className="hover:bg-gray-50 items-center">
+                                <td className="px-4 py-2 flex justify-center">
+                                   <div className="w-12 h-14 bg-gray-200 border border-gray-300 rounded overflow-hidden relative flex items-center justify-center">
+                                      <img 
+                                        src={`${API_BASE}/api/students/${student.registerNumber}/photo?t=${student.photoUpdateTs || ''}`}
+                                        alt="profile"
+                                        className="w-full h-full object-cover absolute inset-0 z-10"
+                                        onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                                      />
+                                      <span className="text-[8px] text-gray-400">None</span>
+                                   </div>
+                                </td>
+                                <td className="px-4 py-3 font-mono font-bold text-gray-800">{student.registerNumber}</td>
+                                <td className="px-4 py-3 text-gray-700">{student.name}</td>
+                                <td className="px-4 py-3 text-gray-600">{student.department}</td>
+                                <td className="px-4 py-3 text-gray-600">{student.semester}</td>
+                                <td className="px-4 py-3">
+                                   <label className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-bold py-1.5 px-3 rounded text-xs cursor-pointer inline-block transition-colors">
+                                      Upload Photo
+                                      <input 
+                                         type="file" 
+                                         accept="image/*" 
+                                         className="hidden" 
+                                         onChange={(e) => handlePhotoUpload(student.registerNumber, e)}
+                                      />
+                                   </label>
+                                </td>
+                             </tr>
+                          ))}
+                       </tbody>
+                    </table>
+                    {profileStudents.length === 0 && (
+                       <div className="p-8 text-center text-gray-500">No students found. Go to Setup tab and upload logins first.</div>
+                    )}
+                 </div>
               </div>
-           )}
-        </main>
-      </div>
-    );
-  }
-
-  if (view === "unit") {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
-        <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0"><div className="flex items-center gap-4"><button onClick={() => setView("tasks")} className="text-gray-500 hover:text-indigo-600 font-bold transition-colors">← Back</button><h1 className="text-xl font-bold text-teal-600 flex items-center gap-2">📋 Unit Test Generator</h1>{activeTask && <span className="bg-teal-100 text-teal-800 text-xs font-bold px-2 py-1 rounded">Task Mode</span>}</div><button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button></header>
-        <main className="flex-1 max-w-5xl mx-auto w-full p-6 space-y-6">
-          <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-            <h2 className="text-xl font-bold mb-4 text-teal-800">Unit Exam Header</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <input value={unitHeader.examSession} onChange={e => setUnitHeader({...unitHeader, examSession: e.target.value})} className="p-2 border rounded" placeholder="Exam Session" />
-              <input value={unitHeader.semesterWord} onChange={e => setUnitHeader({...unitHeader, semesterWord: e.target.value})} className="p-2 border rounded" placeholder="Semester Word" />
-              <input value={unitHeader.department} onChange={e => setUnitHeader({...unitHeader, department: e.target.value})} className="p-2 border rounded" placeholder="Department" />
-              <input value={unitHeader.subject} onChange={e => setUnitHeader({...unitHeader, subject: e.target.value})} className="p-2 border rounded font-bold text-teal-700" placeholder="Subject" />
-              <input value={unitHeader.duration} onChange={e => setUnitHeader({...unitHeader, duration: e.target.value})} className="p-2 border rounded" placeholder="Duration" />
-              <input value={unitHeader.maxMarks} onChange={e => setUnitHeader({...unitHeader, maxMarks: e.target.value})} className="p-2 border rounded" placeholder="Max Marks" />
-            </div>
-          </div>
-          <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4">Part A (5 x 2 = 10 Marks)</h2>{unitPartA.map((q, index) => (<div key={index} className="flex gap-4 mb-3 items-start border-b pb-3"><span className="font-bold text-gray-500 w-8 pt-2">{q.qNo}.</span><textarea value={q.question} onChange={e => { const newA = [...unitPartA]; newA[index].question = e.target.value; setUnitPartA(newA); }} className="flex-1 p-2 border border-gray-300 rounded resize-none" rows="2" placeholder="Question..." /><input value={q.kLevel} onChange={e => { const newA = [...unitPartA]; newA[index].kLevel = e.target.value; setUnitPartA(newA); }} className="w-16 p-2 border rounded text-center" placeholder="K-Level" /><input value={q.co} onChange={e => { const newA = [...unitPartA]; newA[index].co = e.target.value; setUnitPartA(newA); }} className="w-16 p-2 border rounded text-center" placeholder="CO" /></div>))}</div>
-          <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4">Part B (2 x 13 = 26 Marks) - Any 2</h2>{unitPartB.map((q, index) => (<div key={index} className="flex gap-4 mb-3 items-start border-b pb-3"><span className="font-bold text-gray-500 w-8 pt-2">{q.qNo}.</span><textarea value={q.question} onChange={e => { const newB = [...unitPartB]; newB[index].question = e.target.value; setUnitPartB(newB); }} className="flex-1 p-2 border border-gray-300 rounded resize-none" rows="3" placeholder="Question..." /><input value={q.marks} onChange={e => { const newB = [...unitPartB]; newB[index].marks = e.target.value; setUnitPartB(newB); }} className="w-16 p-2 border rounded text-center" placeholder="Marks" /><input value={q.kLevel} onChange={e => { const newB = [...unitPartB]; newB[index].kLevel = e.target.value; setUnitPartB(newB); }} className="w-16 p-2 border rounded text-center" placeholder="K-Level" /><input value={q.co} onChange={e => { const newB = [...unitPartB]; newB[index].co = e.target.value; setUnitPartB(newB); }} className="w-16 p-2 border rounded text-center" placeholder="CO" /></div>))}</div>
-          <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4">Part C (1 x 14 = 14 Marks)</h2><div className="flex gap-4 mb-3 items-start"><span className="font-bold text-gray-500 w-8 pt-2">{unitPartC[0].qNo}.</span><textarea value={unitPartC[0].question} onChange={e => setUnitPartC([{...unitPartC[0], question: e.target.value}])} className="flex-1 p-2 border border-gray-300 rounded resize-none" rows="3" placeholder="Question..." /><input value={unitPartC[0].marks} onChange={e => setUnitPartC([{...unitPartC[0], marks: e.target.value}])} className="w-16 p-2 border rounded text-center" /><input value={unitPartC[0].kLevel} onChange={e => setUnitPartC([{...unitPartC[0], kLevel: e.target.value}])} className="w-16 p-2 border rounded text-center" /><input value={unitPartC[0].co} onChange={e => setUnitPartC([{...unitPartC[0], co: e.target.value}])} className="w-16 p-2 border rounded text-center" /></div></div>
-          <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4">Distribution of COs</h2><div className="grid grid-cols-7 gap-2 text-center font-bold text-sm bg-gray-100 p-2 rounded"><div>Evaluation</div><div>CO1</div><div>CO2</div><div>CO3</div><div>CO4</div><div>CO5</div><div>CO6</div></div><div className="grid grid-cols-7 gap-2 mt-2"><div className="font-bold pt-2 text-center">Marks</div>{coDist.marks.map((m, i) => <input key={`m${i}`} value={m} onChange={e => { const nm = [...coDist.marks]; nm[i] = e.target.value; setCoDist({...coDist, marks: nm}) }} className="border p-2 text-center rounded" />)}</div><div className="grid grid-cols-7 gap-2 mt-2"><div className="font-bold pt-2 text-center">%</div>{coDist.perc.map((p, i) => <input key={`p${i}`} value={p} onChange={e => { const np = [...coDist.perc]; np[i] = e.target.value; setCoDist({...coDist, perc: np}) }} className="border p-2 text-center rounded" />)}</div></div>
-          <div className="flex justify-end pt-4 pb-10"><button onClick={handleGenerateUnitWord} className="bg-teal-600 text-white font-bold py-4 px-8 rounded-lg shadow-lg hover:bg-teal-700 active:scale-95 transition-all text-lg flex items-center gap-2">📄 Submit & Download Unit Test</button></div>
-        </main>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
-      <header className="bg-white shadow px-6 py-4 flex justify-between items-center z-10 sticky top-0"><div className="flex items-center gap-4"><button onClick={() => setView("tasks")} className="text-gray-500 hover:text-indigo-600 font-bold transition-colors">← Back</button><h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">📝 Semester Question Paper Generator</h1>{activeTask && <span className="bg-indigo-100 text-indigo-800 text-xs font-bold px-2 py-1 rounded">Task Mode</span>}</div><button onClick={onLogout} className="text-sm text-red-500 font-medium hover:underline">Logout</button></header>
-      <main className="flex-1 max-w-5xl mx-auto w-full p-6 space-y-6">
-        
-        {/* ✅ TEMPLATE FORMAT TOGGLE */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100 flex justify-between items-center">
-          <div>
-            <h2 className="text-lg font-bold text-indigo-900">Template Format</h2>
-            <p className="text-sm text-gray-500">Select the template format for this question paper.</p>
-          </div>
-          <div className="flex bg-gray-100 p-1 rounded-lg">
-            <button onClick={() => setTemplateType(1)} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${templateType === 1 ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Template 1</button>
-            <button onClick={() => setTemplateType(2)} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${templateType === 2 ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Template 2</button>
-            <button onClick={() => setTemplateType(3)} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${templateType === 3 ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Template 3 (Custom)</button>
-          </div>
-        </div>
-
-        <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4">Exam Header Details</h2><div className="grid grid-cols-2 gap-4"><input value={header.examSession} onChange={e => setHeader({...header, examSession: e.target.value})} className="p-2 border rounded" placeholder="Exam Session" /><input value={header.semesters} onChange={e => setHeader({...header, semesters: e.target.value})} className="p-2 border rounded" placeholder="Semester(s)" /><input value={header.department} onChange={e => setHeader({...header, department: e.target.value})} className="p-2 border rounded" placeholder="Department" /><input value={header.subject} onChange={e => setHeader({...header, subject: e.target.value})} className="p-2 border rounded font-bold text-indigo-700" placeholder="Subject Code & Name" /></div></div>
-        
-        {templateType === 3 ? (
-           <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-             <div className="flex justify-between items-center mb-4">
-                 <h2 className="text-xl font-bold text-orange-800">Custom Paper Content</h2>
-                 <label className="bg-orange-100 text-orange-800 border border-orange-300 font-bold py-2 px-4 rounded-lg cursor-pointer hover:bg-orange-200 transition-colors shadow-sm text-sm">
-                    📄 Import from .docx
-                    <input type="file" accept=".docx" onChange={handleDocxUpload} className="hidden" />
-                 </label>
-             </div>
-             <p className="text-sm text-gray-500 mb-4">Type or paste your custom question paper here, OR click the button above to upload an existing `.docx` file to automatically extract the text!</p>
-             <textarea value={customContent} onChange={e => setCustomContent(e.target.value)} className="w-full h-96 p-4 border border-gray-300 rounded font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="PART A\n1. Explain XYZ...\n2. What is ABC?\n\nPART B\n3. Calculate..." />
-           </div>
-        ) : (
-           <>
-              <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4 text-blue-800">Part A (10 x 2 = 20 Marks)</h2>{partA.map((q, index) => (<div key={index} className="flex gap-4 mb-3 items-start border-b pb-3"><span className="font-bold text-gray-500 w-8 pt-2">Q{q.qNo}.</span><textarea value={q.question} onChange={e => { const newA = [...partA]; newA[index].question = e.target.value; setPartA(newA); }} className="flex-1 p-2 border border-gray-300 rounded resize-none" rows="2" placeholder="Type question here..." /><input value={q.btl} onChange={e => { const newA = [...partA]; newA[index].btl = e.target.value; setPartA(newA); }} className="w-16 p-2 border rounded text-center" placeholder="BTL" /><input value={q.co} onChange={e => { const newA = [...partA]; newA[index].co = e.target.value; setPartA(newA); }} className="w-16 p-2 border rounded text-center" placeholder="CO" /></div>))}</div>
-              <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4 text-green-800">Part B (5 x {templateType === 1 ? "13 = 65" : "16 = 80"} Marks)</h2>{partB.map((q, index) => (<div key={index} className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200"><div className="font-bold text-lg mb-2 text-gray-700">Question {q.qNo}</div><div className="flex gap-4 mb-2"><span className="font-bold text-gray-500 pt-2">(a)</span><textarea value={q.a.question} onChange={e => { const newB = [...partB]; newB[index].a.question = e.target.value; setPartB(newB); }} className="flex-1 p-2 border rounded" rows="2" placeholder="Option A question..." /><input value={q.a.btl} onChange={e => { const newB = [...partB]; newB[index].a.btl = e.target.value; setPartB(newB); }} className="w-16 p-2 border rounded text-center" /><input value={q.a.co} onChange={e => { const newB = [...partB]; newB[index].a.co = e.target.value; setPartB(newB); }} className="w-16 p-2 border rounded text-center" /></div><div className="text-center font-bold text-gray-400 text-sm italic my-1">(OR)</div><div className="flex gap-4"><span className="font-bold text-gray-500 pt-2">(b)</span><textarea value={q.b.question} onChange={e => { const newB = [...partB]; newB[index].b.question = e.target.value; setPartB(newB); }} className="flex-1 p-2 border rounded" rows="2" placeholder="Option B question..." /><input value={q.b.btl} onChange={e => { const newB = [...partB]; newB[index].b.btl = e.target.value; setPartB(newB); }} className="w-16 p-2 border rounded text-center" /><input value={q.b.co} onChange={e => { const newB = [...partB]; newB[index].b.co = e.target.value; setPartB(newB); }} className="w-16 p-2 border rounded text-center" /></div></div>))}</div>
-              
-              {templateType === 1 && (
-                <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100"><h2 className="text-xl font-bold mb-4 text-purple-800">Part C (1 x 15 = 15 Marks)</h2><div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200"><div className="font-bold text-lg mb-2 text-gray-700">Question {partC.qNo}</div><div className="flex gap-4 mb-2"><span className="font-bold text-gray-500 pt-2">(a)</span><textarea value={partC.a.question} onChange={e => setPartC({ ...partC, a: { ...partC.a, question: e.target.value } })} className="flex-1 p-2 border rounded" rows="2" placeholder="Option A question..." /><input value={partC.a.btl} onChange={e => setPartC({ ...partC, a: { ...partC.a, btl: e.target.value } })} className="w-16 p-2 border rounded text-center" /><input value={partC.a.co} onChange={e => setPartC({ ...partC, a: { ...partC.a, co: e.target.value } })} className="w-16 p-2 border rounded text-center" /></div><div className="text-center font-bold text-gray-400 text-sm italic my-1">(OR)</div><div className="flex gap-4"><span className="font-bold text-gray-500 pt-2">(b)</span><textarea value={partC.b.question} onChange={e => setPartC({ ...partC, b: { ...partC.b, question: e.target.value } })} className="flex-1 p-2 border rounded" rows="2" placeholder="Option B question..." /><input value={partC.b.btl} onChange={e => setPartC({ ...partC, b: { ...partC.b, btl: e.target.value } })} className="w-16 p-2 border rounded text-center" /><input value={partC.b.co} onChange={e => setPartC({ ...partC, b: { ...partC.b, co: e.target.value } })} className="w-16 p-2 border rounded text-center" /></div></div></div>
-              )}
-           </>
+           </motion.div>
         )}
 
-        <div className="flex justify-end pt-4 pb-10"><button onClick={handleGenerateWord} className="bg-indigo-600 text-white font-bold py-4 px-8 rounded-lg shadow-lg hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center gap-2">📄 Submit & Download Word Template</button></div>
       </main>
     </div>
   );
 }
-

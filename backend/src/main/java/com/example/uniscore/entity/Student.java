@@ -18,9 +18,15 @@ public class Student {
     
     private Integer semester; 
     
-    // ✅ NEW: Automatically tracks the Academic Year (1, 2, 3, or 4)
+    // ✅ Automatically tracks the Academic Year (1, 2, 3, or 4)
     @Column(name = "academic_year")
     private Integer year; 
     
+    @Builder.Default
     private String role = "student";
+    
+    // ✅ NEW: Stores the uploaded profile photo directly in the database
+    @Lob
+    @Column(columnDefinition="LONGBLOB")
+    private byte[] photo;
 }

@@ -4,12 +4,8 @@ import com.example.uniscore.entity.Result;
 import com.example.uniscore.entity.Student;
 import com.example.uniscore.repo.ResultRepo;
 import com.example.uniscore.repo.StudentRepo;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-
 import java.util.List;
 import java.util.Map;
 
@@ -42,33 +38,5 @@ public class StudentProfileController {
             "student", student,
             "results", results
         ));
-    }
-
-    // --- NEW: Upload Photo Endpoint ---
-    @PostMapping("/{regNo}/photo")
-    public ResponseEntity<?> uploadPhoto(@PathVariable String regNo, @RequestParam("photo") MultipartFile file) {
-        try {
-            Student student = studentRepo.findById(regNo).orElse(null);
-            if (student == null) return ResponseEntity.badRequest().body(Map.of("error", "Student not found"));
-            
-            student.setPhoto(file.getBytes());
-            studentRepo.save(student);
-            
-            return ResponseEntity.ok(Map.of("message", "Photo uploaded successfully"));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "Could not upload photo"));
-        }
-    }
-
-    // --- NEW: Serve Photo to the React App ---
-    @GetMapping("/{regNo}/photo")
-    public ResponseEntity<byte[]> getPhoto(@PathVariable String regNo) {
-        Student student = studentRepo.findById(regNo).orElse(null);
-        if (student == null || student.getPhoto() == null) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_JPEG_VALUE)
-                .body(student.getPhoto());
     }
 }

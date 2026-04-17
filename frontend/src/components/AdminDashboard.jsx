@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
 import Tesseract from "tesseract.js";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
+import mammoth from "mammoth"; // ✅ Added Mammoth for Docx reading
 
 import { API_BASE, normalizeRowKeys, readFirstSheet, exportSemesterPaperDocx, exportUnitTestPaperDocx, exportClaimFormDocx, mergeResults, exportHallTicketsDocx } from "../utils.js";
 import GPACalculator from "./GPACalculator"; 
@@ -59,7 +60,7 @@ export default function AdminDashboard({ onLogout }) {
   const [qPaperSubTab, setQPaperSubTab] = useState("bank");
   const [viewingClaim, setViewingClaim] = useState(null);
 
-  // HALL TICKET STATE
+  // --- HALL TICKET STATE ---
   const [htDept, setHtDept] = useState("CSE");
   const [htSem, setHtSem] = useState("3");
   const [htSession, setHtSession] = useState("November / December 2026");
@@ -67,7 +68,11 @@ export default function AdminDashboard({ onLogout }) {
   const [htNotes, setHtNotes] = useState("1. This Hall Ticket is valid only if the candidate's admission is approved.\n2. Correction in Name/DOB/Photo should be reported immediately.\n3. Instructions printed overleaf must be strictly followed.");
   const [generatedTickets, setGeneratedTickets] = useState([]);
   const [isGeneratingHT, setIsGeneratingHT] = useState(false);
-  const [printSingleId, setPrintSingleId] = useState(null); // Controls individual printing
+  const [printSingleId, setPrintSingleId] = useState(null); 
+  
+  // ✅ NEW: CUSTOM DOCX TEMPLATE STATE
+  const [htTemplateMode, setHtTemplateMode] = useState("STANDARD");
+  const [customHtContent, setCustomHtContent] = useState("");
 
   // PROFILES STATE
   const [profileStudents, setProfileStudents] = useState([]);
@@ -182,7 +187,6 @@ export default function AdminDashboard({ onLogout }) {
   const handleUnpublishLive = async (targetSem, targetDept) => { if(!confirm(`🚨 DANGER: Are you sure you want to DROP/UNPUBLISH the LIVE results for ${targetDept} Sem ${targetSem}?`)) return; try { const res = await fetch(`${API_BASE}/api/import/unpublish?semester=${targetSem}&department=${targetDept}`, { method: "DELETE" }); if(res.ok) { setMessage(`✅ Successfully dropped live results for ${targetDept} Semester ${targetSem}.`); } else { const text = await res.text(); setMessage(`❌ Error unpublishing: ${text}`); } } catch(err) { setMessage("❌ Network error dropping live results."); } };
   const handlePromote = async (targetDept, targetSem) => { if(!confirm(`⚠️ PROMOTION: Are you sure you want to promote all ${targetDept} Semester ${targetSem} students to the next stage?`)) return; setLoading(true); try { const res = await fetch(`${API_BASE}/api/import/promote-students?department=${targetDept}&currentSemester=${targetSem}`, { method: "POST" }); const data = await res.json(); if(res.ok) setMessage(`🎉 Success: ${data.message}`); else setMessage(`❌ Error: ${data.error || "Promotion failed"}`); } catch (err) { setMessage("❌ Network error during promotion."); } setLoading(false); };
   const handleDeletePaper = async (id) => { if (!confirm("⚠️ Are you sure you want to permanently delete this question paper?")) return; setLoading(true); try { const res = await fetch(`${API_BASE}/api/import/question-paper/${id}`, { method: "DELETE" }); const data = await res.json(); if (res.ok) { setMessage(`✅ Success: ${data.message}`); setSavedPapers(prev => prev.filter(paper => paper.id !== id)); } else { setMessage(`❌ Error: ${data.error}`); } } catch (err) { setMessage("❌ Network error during deletion."); } setLoading(false); };
-  
   const handleSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ The AI Scanner requires an Image file (PNG/JPG). Please take a screenshot of your PDF and upload the image!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted text below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear, or try a different file."); setShowOcrModal(false); } setLoading(false); };
   const parseOcrDataToDB = () => { const currentDept = deptRef.current; const currentSem = String(sem); const lines = ocrText.split('\n'); const finalPayload = []; const regex = /(1127\d{8}|[A-Z0-9]{10,14}).*?(\d{1,3})/i; lines.forEach(line => { const match = line.match(regex); if (match) { const regNo = match[1].toUpperCase(); const mark = parseInt(match[2]); if (mark <= 100) { finalPayload.push({ registerNumber: regNo, subjectCode: selectedSubject || "SCANNED", semester: currentSem, grade: mark >= 50 ? "PASS" : "FAIL", result: mark >= 50 ? "PASS" : "FAIL", mark: String(mark), department: currentDept }); } } }); if (finalPayload.length === 0) { alert("⚠️ Could not find valid Register Numbers and Marks in the text."); return; } if(!confirm(`📢 SCANNED UPLOAD:\nFound ${finalPayload.length} valid students.\nClick OK to upload directly to Drafts.`)) return; apiPost("/api/import/results", finalPayload).then((success) => { if(success) { setShowOcrModal(false); setTimeout(() => handlePreview(currentSem, currentDept), 1500); } }); };
   const handleManualSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ You uploaded a PDF. Please change the Dropdown above to 'Native PDF' instead of 'AI Smart Scan'!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowManualOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setManualOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted grades below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear."); setShowManualOcrModal(false); } setLoading(false); };
@@ -323,6 +327,17 @@ export default function AdminDashboard({ onLogout }) {
      setIsGeneratingHT(false);
   };
 
+  // ✅ NEW: Read the custom docx template for hall tickets
+  const handleHtDocxUpload = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try { 
+        const arrayBuffer = await file.arrayBuffer(); 
+        const result = await mammoth.extractRawText({ arrayBuffer }); 
+        setCustomHtContent(result.value); 
+        alert("✅ Custom Document layout successfully extracted!"); 
+    } catch (err) { alert("❌ Failed to read DOCX file. Make sure it is a valid Word Document."); }
+  };
+
   const getBranchName = (deptCode) => {
      if (deptCode === "CSE") return "B.E. Computer Science and Engineering";
      if (deptCode === "ECE") return "B.E. Electronics and Communication Engineering";
@@ -339,7 +354,6 @@ export default function AdminDashboard({ onLogout }) {
      return `B.E. ${deptCode}`;
   };
 
-  // Trigger individual print by isolating the ticket
   const printIndividualTicket = (regNo) => {
       setPrintSingleId(regNo);
       setTimeout(() => {
@@ -377,113 +391,130 @@ export default function AdminDashboard({ onLogout }) {
 
                return (
                  <div key={ticket.student.registerNumber} className="print:w-[195mm] print:h-[285mm] p-2 mx-auto box-border" style={{ pageBreakAfter: "always" }}>
-                    <div className="border-[3px] border-black p-1 h-full flex flex-col relative overflow-hidden">
-                       
-                       <div className="flex border-b-[3px] border-black h-28 shrink-0">
-                          <div className="w-32 flex justify-center items-center p-2 border-r-[3px] border-black">
-                             <div className="w-20 h-20 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-bold text-center leading-tight">ANNA<br/>UNIV<br/>LOGO</div>
-                          </div>
-                          <div className="flex-1 flex flex-col items-center justify-center text-center p-2">
-                             <h1 className="text-2xl font-bold uppercase tracking-widest">Anna University</h1>
-                             <p className="text-sm font-bold uppercase tracking-wider">Chennai - 600 025</p>
-                             <p className="text-sm font-medium mt-1">UNIVERSITY EXAMINATIONS - {htSession}</p>
-                             <p className="text-lg font-bold mt-1 tracking-widest">HALL TICKET</p>
-                          </div>
-                          <div className="w-32 border-l-[3px] border-black flex flex-col items-center justify-center p-2 bg-white">
-                             <div className="w-20 h-24 border border-gray-400 flex items-center justify-center overflow-hidden bg-gray-50 relative">
-                                <img 
-                                  src={`${API_BASE}/api/students/${ticket.student.registerNumber}/photo?t=${ticket.student.photoUpdateTs || ''}`} 
-                                  alt={ticket.student.registerNumber}
-                                  className="w-full h-full object-cover absolute inset-0 z-10"
-                                  onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
-                                />
-                                <span className="text-[10px] text-gray-400 text-center px-1">Photo Missing</span>
-                             </div>
-                          </div>
-                       </div>
+                    
+                    {/* IF STANDARD TEMPLATE */}
+                    {htTemplateMode === "STANDARD" ? (
+                      <div className="border-[3px] border-black p-1 h-full flex flex-col relative overflow-hidden">
+                         <div className="flex border-b-[3px] border-black h-28 shrink-0">
+                            <div className="w-32 flex justify-center items-center p-2 border-r-[3px] border-black">
+                               <div className="w-20 h-20 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-bold text-center leading-tight">ANNA<br/>UNIV<br/>LOGO</div>
+                            </div>
+                            <div className="flex-1 flex flex-col items-center justify-center text-center p-2">
+                               <h1 className="text-2xl font-bold uppercase tracking-widest">Anna University</h1>
+                               <p className="text-sm font-bold uppercase tracking-wider">Chennai - 600 025</p>
+                               <p className="text-sm font-medium mt-1">UNIVERSITY EXAMINATIONS - {htSession}</p>
+                               <p className="text-lg font-bold mt-1 tracking-widest">HALL TICKET</p>
+                            </div>
+                            <div className="w-32 border-l-[3px] border-black flex flex-col items-center justify-center p-2 bg-white">
+                               <div className="w-20 h-24 border border-gray-400 flex items-center justify-center overflow-hidden bg-gray-50 relative">
+                                  <img 
+                                    src={`${API_BASE}/api/students/${ticket.student.registerNumber}/photo?t=${ticket.student.photoUpdateTs || ''}`} 
+                                    alt={ticket.student.registerNumber}
+                                    className="w-full h-full object-cover absolute inset-0 z-10"
+                                    onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                                  />
+                                  <span className="text-[10px] text-gray-400 text-center px-1">Photo Missing</span>
+                               </div>
+                            </div>
+                         </div>
 
-                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
-                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Register Number</div>
-                          <div className="flex-1 p-2 font-bold border-r-[3px] border-black flex items-center tracking-widest">{ticket.student.registerNumber}</div>
-                          <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">Current Semester</div>
-                          <div className="w-16 p-2 font-bold flex items-center justify-center">{String(htSem).padStart(2, '0')}</div>
-                       </div>
+                         <div className="flex border-b-[3px] border-black text-sm shrink-0">
+                            <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Register Number</div>
+                            <div className="flex-1 p-2 font-bold border-r-[3px] border-black flex items-center tracking-widest">{ticket.student.registerNumber}</div>
+                            <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">Current Semester</div>
+                            <div className="w-16 p-2 font-bold flex items-center justify-center">{String(htSem).padStart(2, '0')}</div>
+                         </div>
 
-                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
-                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Name</div>
-                          <div className="flex-1 p-2 font-bold uppercase border-r-[3px] border-black flex items-center">{ticket.student.name}</div>
-                          <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">D.O.B</div>
-                          <div className="w-32 p-2 font-bold flex items-center whitespace-nowrap">{ticket.student.password && ticket.student.password.includes("-") ? ticket.student.password : "-"}</div>
-                       </div>
+                         <div className="flex border-b-[3px] border-black text-sm shrink-0">
+                            <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Name</div>
+                            <div className="flex-1 p-2 font-bold uppercase border-r-[3px] border-black flex items-center">{ticket.student.name}</div>
+                            <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">D.O.B</div>
+                            <div className="w-32 p-2 font-bold flex items-center whitespace-nowrap">{ticket.student.password && ticket.student.password.includes("-") ? ticket.student.password : "-"}</div>
+                         </div>
 
-                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
-                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Degree & Branch</div>
-                          <div className="flex-1 p-2 font-bold uppercase flex items-center">{getBranchName(htDept)}</div>
-                       </div>
+                         <div className="flex border-b-[3px] border-black text-sm shrink-0">
+                            <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Degree & Branch</div>
+                            <div className="flex-1 p-2 font-bold uppercase flex items-center">{getBranchName(htDept)}</div>
+                         </div>
 
-                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
-                          <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Examination Centre</div>
-                          <div className="flex-1 p-2 font-bold uppercase flex items-center">{htCentre}</div>
-                       </div>
+                         <div className="flex border-b-[3px] border-black text-sm shrink-0">
+                            <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Examination Centre</div>
+                            <div className="flex-1 p-2 font-bold uppercase flex items-center">{htCentre}</div>
+                         </div>
 
-                       {/* Subjects split correctly */}
-                       <div className="flex flex-1 border-b-[3px] border-black overflow-hidden">
-                          <div className="flex-1 border-r-[3px] border-black flex flex-col h-full">
-                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1 shrink-0">
-                                <div className="w-10 text-center">Sem</div>
-                                <div className="w-20 text-center">Sub Code</div>
-                                <div className="flex-1 pl-2">Subject Title</div>
-                             </div>
-                             <div className="p-2 space-y-2 overflow-hidden">
-                                {leftCol.map((sub, i) => (
-                                   <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
-                                      <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
-                                      <div className="w-20 text-center">{sub.code}</div>
-                                      <div className="flex-1 pl-2 truncate">{sub.title}</div>
-                                   </div>
-                                ))}
-                             </div>
-                             <div className="mt-auto p-4 font-bold text-sm bg-white shrink-0">
-                                No of Subjects Registered: {allDisplaySubjects.length}
-                             </div>
-                          </div>
-                          
-                          <div className="flex-1 flex flex-col h-full">
-                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1 shrink-0">
-                                <div className="w-10 text-center">Sem</div>
-                                <div className="w-20 text-center">Sub Code</div>
-                                <div className="flex-1 pl-2">Subject Title</div>
-                             </div>
-                             <div className="p-2 space-y-2 overflow-hidden">
-                                {rightCol.map((sub, i) => (
-                                   <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
-                                      <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
-                                      <div className="w-20 text-center">{sub.code}</div>
-                                      <div className="flex-1 pl-2 truncate">{sub.title}</div>
-                                   </div>
-                                ))}
-                             </div>
-                          </div>
-                       </div>
+                         <div className="flex flex-1 border-b-[3px] border-black overflow-hidden">
+                            <div className="flex-1 border-r-[3px] border-black flex flex-col h-full">
+                               <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1 shrink-0">
+                                  <div className="w-10 text-center">Sem</div>
+                                  <div className="w-20 text-center">Sub Code</div>
+                                  <div className="flex-1 pl-2">Subject Title</div>
+                               </div>
+                               <div className="p-2 space-y-2 overflow-hidden">
+                                  {leftCol.map((sub, i) => (
+                                     <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
+                                        <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
+                                        <div className="w-20 text-center">{sub.code}</div>
+                                        <div className="flex-1 pl-2 truncate">{sub.title}</div>
+                                     </div>
+                                  ))}
+                               </div>
+                               <div className="mt-auto p-4 font-bold text-sm bg-white shrink-0">
+                                  No of Subjects Registered: {allDisplaySubjects.length}
+                               </div>
+                            </div>
+                            
+                            <div className="flex-1 flex flex-col h-full">
+                               <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1 shrink-0">
+                                  <div className="w-10 text-center">Sem</div>
+                                  <div className="w-20 text-center">Sub Code</div>
+                                  <div className="flex-1 pl-2">Subject Title</div>
+                               </div>
+                               <div className="p-2 space-y-2 overflow-hidden">
+                                  {rightCol.map((sub, i) => (
+                                     <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
+                                        <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
+                                        <div className="w-20 text-center">{sub.code}</div>
+                                        <div className="flex-1 pl-2 truncate">{sub.title}</div>
+                                     </div>
+                                  ))}
+                               </div>
+                            </div>
+                         </div>
 
-                       <div className="p-2 text-[10px] h-20 shrink-0 bg-white">
-                          <p className="font-bold mb-1">NOTE :</p>
-                          <div className="whitespace-pre-line leading-tight ml-4 pl-4" style={{textIndent: "-1rem"}}>{htNotes}</div>
-                       </div>
+                         <div className="p-2 text-[10px] h-20 shrink-0 bg-white">
+                            <p className="font-bold mb-1">NOTE :</p>
+                            <div className="whitespace-pre-line leading-tight ml-4 pl-4" style={{textIndent: "-1rem"}}>{htNotes}</div>
+                         </div>
 
-                       <div className="flex border-t-[3px] border-black h-20 shrink-0 relative bg-white">
-                          <div className="absolute top-2 left-2 text-[10px] font-bold">Generated on: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-                          <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500">Signature of the Candidate</div>
-                          <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500 relative">
-                             <div className="absolute top-1 right-2 w-12 h-12 rounded-full border border-gray-400 flex items-center justify-center text-[6px] text-center text-gray-400 opacity-50 transform -rotate-12">SEAL</div>
-                             Signature of the Principal with seal
-                          </div>
-                          <div className="flex-1 flex items-end justify-center pb-2 text-xs text-gray-500 relative">
-                             <div className="absolute bottom-6 right-10 text-black font-serif text-2xl opacity-80 transform -rotate-6">Controller</div>
-                             Controller of Examinations
-                          </div>
-                       </div>
-                    </div>
+                         <div className="flex border-t-[3px] border-black h-20 shrink-0 relative bg-white">
+                            <div className="absolute top-2 left-2 text-[10px] font-bold">Generated on: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                            <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500">Signature of the Candidate</div>
+                            <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500 relative">
+                               <div className="absolute top-1 right-2 w-12 h-12 rounded-full border border-gray-400 flex items-center justify-center text-[6px] text-center text-gray-400 opacity-50 transform -rotate-12">SEAL</div>
+                               Signature of the Principal with seal
+                            </div>
+                            <div className="flex-1 flex items-end justify-center pb-2 text-xs text-gray-500 relative">
+                               <div className="absolute bottom-6 right-10 text-black font-serif text-2xl opacity-80 transform -rotate-6">Controller</div>
+                               Controller of Examinations
+                            </div>
+                         </div>
+                      </div>
+                    ) : (
+                      
+                      // IF CUSTOM DOCX TEMPLATE MODE
+                      <div className="border border-black p-6 h-full flex flex-col whitespace-pre-wrap font-mono text-xs">
+                         {/* Replace placeholders with actual data */}
+                         {customHtContent
+                            .replace(/\[NAME\]/g, ticket.student.name)
+                            .replace(/\[REG_?NO\]/g, ticket.student.registerNumber)
+                            .replace(/\[DEPT\]/g, getBranchName(htDept))
+                            .replace(/\[SEM\]/g, htSem)
+                            .replace(/\[DOB\]/g, ticket.student.password)
+                            .replace(/\[SUBJECTS\]/g, allDisplaySubjects.map(s => `${s.code} - ${s.title}`).join('\n'))
+                         }
+                      </div>
+
+                    )}
                  </div>
                );
             })}
@@ -637,16 +668,37 @@ export default function AdminDashboard({ onLogout }) {
                  </button>
               </div>
 
+              {/* ✅ NEW: TOGGLEABLE TEMPLATE BUILDER */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                 <h3 className="font-bold text-gray-700 mb-4 border-b pb-2">Template Builder Settings</h3>
-                 <div className="space-y-4">
-                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Exam Session Header</label><input type="text" value={htSession} onChange={e=>setHtSession(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-bold text-gray-700" /></div>
-                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Examination Centre Name</label><input type="text" value={htCentre} onChange={e=>setHtCentre(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-bold text-gray-700 uppercase" /></div>
-                    <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Instructions / Notes (Bottom Left)</label><textarea value={htNotes} onChange={e=>setHtNotes(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-mono h-24" /></div>
+                 <div className="flex justify-between items-center border-b pb-4 mb-4">
+                    <h3 className="font-bold text-gray-700">Template Builder Settings</h3>
+                    <div className="flex bg-gray-100 p-1 rounded-lg">
+                       <button onClick={() => setHtTemplateMode("STANDARD")} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${htTemplateMode === "STANDARD" ? "bg-white text-pink-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Standard Template</button>
+                       <button onClick={() => setHtTemplateMode("CUSTOM")} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${htTemplateMode === "CUSTOM" ? "bg-white text-pink-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>Custom (.docx)</button>
+                    </div>
                  </div>
+
+                 {htTemplateMode === "STANDARD" ? (
+                     <div className="space-y-4">
+                        <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Exam Session Header</label><input type="text" value={htSession} onChange={e=>setHtSession(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-bold text-gray-700" /></div>
+                        <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Examination Centre Name</label><input type="text" value={htCentre} onChange={e=>setHtCentre(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-bold text-gray-700 uppercase" /></div>
+                        <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Instructions / Notes (Bottom Left)</label><textarea value={htNotes} onChange={e=>setHtNotes(e.target.value)} className="w-full p-2 border border-gray-300 rounded outline-none text-sm font-mono h-24" /></div>
+                     </div>
+                 ) : (
+                     <div className="space-y-4">
+                        <div className="flex justify-between items-center mb-2">
+                           <p className="text-sm text-gray-500">Import a custom `.docx` file layout. Use tags like <b>[NAME]</b>, <b>[REGNO]</b>, <b>[SUBJECTS]</b> to auto-fill.</p>
+                           <label className="bg-pink-100 text-pink-800 border border-pink-300 font-bold py-2 px-4 rounded-lg cursor-pointer hover:bg-pink-200 transition-colors shadow-sm text-sm">
+                              📄 Import .docx
+                              <input type="file" accept=".docx" onChange={handleHtDocxUpload} className="hidden" />
+                           </label>
+                        </div>
+                        <textarea value={customHtContent} onChange={e=>setCustomHtContent(e.target.value)} className="w-full p-4 border border-gray-300 rounded outline-none text-sm font-mono h-48 focus:ring-2 focus:ring-pink-500" placeholder="HALL TICKET\n\nName: [NAME]\nRegister No: [REGNO]\n\nSubjects:\n[SUBJECTS]" />
+                     </div>
+                 )}
               </div>
 
-              {/* NEW PREVIEW TABLE WITH ALL DOWNLOAD OPTIONS */}
+              {/* Preview Table */}
               {generatedTickets.length > 0 && (
                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
@@ -700,7 +752,7 @@ export default function AdminDashboard({ onLogout }) {
            </motion.div>
         )}
 
-        {/* SETTINGS, GPA, SETUP, EXCEL, GRID, PROCESS, MANUAL, MANAGE, QPAPERS ... */}
+        {/* SETTINGS VIEW */}
         {activeTab === "settings" && (
            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 max-w-md">
@@ -718,8 +770,10 @@ export default function AdminDashboard({ onLogout }) {
            </motion.div>
         )}
 
+        {/* GPA VIEW */}
         {activeTab === "gpa" && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}><div className="max-w-4xl mx-auto"><GPACalculator /></div></motion.div>)}
         
+        {/* Other Tabs (Setup, Excel, Grid, Process, Manual, Manage) */}
         {activeTab === "setup" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6"> 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex gap-4 items-end">

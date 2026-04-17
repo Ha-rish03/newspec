@@ -243,3 +243,95 @@ export const exportUnitTestPaperDocx = async (config) => {
     saveAs(blob, `${(unitHeader.subject || "UnitTest").substring(0,6)}_UnitTest.docx`);
   } catch(err) { alert("❌ Error creating Unit Test document: " + err.message); }
 };
+
+// --- NEW: HALL TICKET DOCX EXPORTER ---
+export const exportHallTicketsDocx = async (tickets, settings, deptCode) => {
+  try {
+    const sections = tickets.map((ticket, index) => {
+      
+      const allSubjects = [
+          ...ticket.currentSubjects.map(sub => ({ sem: settings.sem, code: sub.subjectCode, title: sub.subjectName })),
+          ...ticket.arrears.map(arr => ({ sem: arr.semester, code: arr.subjectCode || arr.subject, title: "ARREAR SUBJECT" }))
+      ];
+
+      return {
+        properties: { page: { margin: { top: 700, bottom: 700, left: 700, right: 700 } } },
+        children: [
+          new Paragraph({ children: [new TextRun({ text: "ANNA UNIVERSITY", bold: true, size: 36 })], alignment: AlignmentType.CENTER }),
+          new Paragraph({ children: [new TextRun({ text: "CHENNAI - 600 025", bold: true, size: 20 })], alignment: AlignmentType.CENTER }),
+          new Paragraph({ children: [new TextRun({ text: `UNIVERSITY EXAMINATIONS - ${settings.session}`, size: 24 })], alignment: AlignmentType.CENTER, spacing: { before: 100 } }),
+          new Paragraph({ children: [new TextRun({ text: "HALL TICKET", bold: true, size: 28 })], alignment: AlignmentType.CENTER, spacing: { before: 100, after: 300 } }),
+          
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+              new TableRow({ children: [
+                new TableCell({ children: [new Paragraph({ text: "Register Number", bold: true })], width: { size: 20, type: WidthType.PERCENTAGE } }),
+                new TableCell({ children: [new Paragraph({ text: ticket.student.registerNumber, bold: true })], width: { size: 50, type: WidthType.PERCENTAGE } }),
+                new TableCell({ children: [new Paragraph({ text: "Current Semester", bold: true })], width: { size: 20, type: WidthType.PERCENTAGE } }),
+                new TableCell({ children: [new Paragraph({ text: String(settings.sem), bold: true })], width: { size: 10, type: WidthType.PERCENTAGE } })
+              ]}),
+              new TableRow({ children: [
+                new TableCell({ children: [new Paragraph({ text: "Name", bold: true })] }),
+                new TableCell({ children: [new Paragraph({ text: ticket.student.name, bold: true })] }),
+                new TableCell({ children: [new Paragraph({ text: "D.O.B", bold: true })] }),
+                new TableCell({ children: [new Paragraph({ text: ticket.student.password || "-" })] })
+              ]}),
+              new TableRow({ children: [
+                new TableCell({ children: [new Paragraph({ text: "Degree & Branch", bold: true })] }),
+                new TableCell({ children: [new Paragraph({ text: deptCode, bold: true })], columnSpan: 3 })
+              ]}),
+              new TableRow({ children: [
+                new TableCell({ children: [new Paragraph({ text: "Exam Centre", bold: true })] }),
+                new TableCell({ children: [new Paragraph({ text: settings.centre, bold: true })], columnSpan: 3 })
+              ]})
+            ]
+          }),
+
+          new Paragraph({ text: "Registered Subjects:", bold: true, spacing: { before: 300, after: 100 } }),
+          
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+              new TableRow({ children: [
+                new TableCell({ children: [new Paragraph({ text: "Sem", bold: true })] }),
+                new TableCell({ children: [new Paragraph({ text: "Sub Code", bold: true })] }),
+                new TableCell({ children: [new Paragraph({ text: "Subject Title", bold: true })] })
+              ]}),
+              ...allSubjects.map(sub => new TableRow({ children: [
+                new TableCell({ children: [new Paragraph({ text: String(sub.sem).padStart(2,'0') })] }),
+                new TableCell({ children: [new Paragraph({ text: sub.code })] }),
+                new TableCell({ children: [new Paragraph({ text: sub.title })] })
+              ]}))
+            ]
+          }),
+
+          new Paragraph({ text: `Total Subjects Registered: ${allSubjects.length}`, bold: true, spacing: { before: 200, after: 400 } }),
+          
+          new Paragraph({ text: "NOTE:", bold: true }),
+          ...settings.notes.split('\n').map(line => new Paragraph({ text: line, size: 18 })),
+
+          new Paragraph({ text: "", spacing: { before: 600 } }),
+          
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE } },
+            rows: [
+              new TableRow({ children: [
+                new TableCell({ children: [new Paragraph({ text: "Signature of the Candidate", alignment: AlignmentType.CENTER })] }),
+                new TableCell({ children: [new Paragraph({ text: "Signature of Principal with seal", alignment: AlignmentType.CENTER })] }),
+                new TableCell({ children: [new Paragraph({ text: "Controller of Examinations", alignment: AlignmentType.CENTER })] })
+              ]})
+            ]
+          })
+        ]
+      };
+    });
+
+    const doc = new Document({ sections });
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `HallTickets_${deptCode}_Sem${settings.sem}.docx`);
+  } catch (err) {
+    alert("Error exporting Docx: " + err.message);
+  }
+};

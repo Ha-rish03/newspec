@@ -4,13 +4,13 @@ import * as XLSX from "xlsx";
 import Tesseract from "tesseract.js";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 
-import { API_BASE, normalizeRowKeys, readFirstSheet, exportSemesterPaperDocx, exportUnitTestPaperDocx, exportClaimFormDocx, mergeResults } from "../utils.js";
+import { API_BASE, normalizeRowKeys, readFirstSheet, exportSemesterPaperDocx, exportUnitTestPaperDocx, exportClaimFormDocx, mergeResults, exportHallTicketsDocx } from "../utils.js";
 import GPACalculator from "./GPACalculator"; 
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
 
 export default function AdminDashboard({ onLogout }) {
-  const [activeTab, setActiveTab] = useState("profiles"); // Default to new tab for testing
+  const [activeTab, setActiveTab] = useState("halltickets"); 
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const DEPARTMENTS = ["CSE", "IT", "ECE", "EEE", "AIDS", "MECH", "CIVIL", "AERO","CSBS","BIOTECH"];
@@ -67,10 +67,13 @@ export default function AdminDashboard({ onLogout }) {
   const [htNotes, setHtNotes] = useState("1. This Hall Ticket is valid only if the candidate's admission is approved.\n2. Correction in Name/DOB/Photo should be reported immediately.\n3. Instructions printed overleaf must be strictly followed.");
   const [generatedTickets, setGeneratedTickets] = useState([]);
   const [isGeneratingHT, setIsGeneratingHT] = useState(false);
+  const [printSingleId, setPrintSingleId] = useState(null); // Controls individual printing
 
-  // --- NEW: PROFILES STATE ---
+  // PROFILES STATE
   const [profileStudents, setProfileStudents] = useState([]);
   const [profileSearch, setProfileSearch] = useState("");
+  const [profileDeptFilter, setProfileDeptFilter] = useState("All");
+  const [profileSemFilter, setProfileSemFilter] = useState("All");
 
   const deptRef = useRef(dept); 
   const manualDeptRef = useRef(manualDept); 
@@ -98,10 +101,7 @@ export default function AdminDashboard({ onLogout }) {
       fetch(`${API_BASE}/api/import/question-papers`).then(res => res.ok ? res.json() : []).then(data => setSavedPapers(Array.isArray(data) ? data : [])).catch(() => setSavedPapers([]));
       fetch(`${API_BASE}/api/requisitions`).then(res => res.ok ? res.json() : []).then(data => setRequisitions(Array.isArray(data) ? data : [])).catch(() => setRequisitions([]));
     }
-    // FETCH PROFILES WHEN TAB OPENS
-    if (activeTab === "profiles") {
-      fetchProfiles();
-    }
+    if (activeTab === "profiles") fetchProfiles();
   }, [activeTab, qPaperSubTab]);
 
   const fetchProfiles = async () => {
@@ -127,15 +127,10 @@ export default function AdminDashboard({ onLogout }) {
     } catch (err) { setMessage(`❌ Error: ${err.message}`); return false; } finally { setLoading(false); }
   };
 
-  // --- NEW: PHOTO UPLOAD LOGIC ---
   const handlePhotoUpload = async (regNo, e) => {
      const file = e.target.files[0];
      if (!file) return;
-     
-     // Optional: Validate file size (e.g., max 2MB)
-     if (file.size > 2 * 1024 * 1024) {
-         return alert("Image is too large. Please upload an image under 2MB.");
-     }
+     if (file.size > 2 * 1024 * 1024) return alert("Image is too large. Please upload an image under 2MB.");
 
      const formData = new FormData();
      formData.append("photo", file);
@@ -143,24 +138,17 @@ export default function AdminDashboard({ onLogout }) {
      setLoading(true);
      setMessage(`⏳ Uploading photo for ${regNo}...`);
      try {
-         const response = await fetch(`${API_BASE}/api/students/${regNo}/photo`, {
-             method: "POST",
-             body: formData
-         });
+         const response = await fetch(`${API_BASE}/api/students/${regNo}/photo`, { method: "POST", body: formData });
          if (response.ok) {
              setMessage(`✅ Successfully updated photo for ${regNo}`);
-             // Force image reload on frontend by triggering a re-render with a new timestamp
              setProfileStudents(prev => prev.map(s => s.registerNumber === regNo ? {...s, photoUpdateTs: Date.now()} : s));
          } else {
              setMessage(`❌ Failed to upload photo for ${regNo}`);
          }
-     } catch (err) {
-         setMessage(`❌ Network error while uploading photo.`);
-     }
+     } catch (err) { setMessage(`❌ Network error while uploading photo.`); }
      setLoading(false);
   };
 
-  // Admin Password
   const handleAdminPasswordChange = async () => {
     if(!newAdminPassword) return alert("Please enter a new password");
     setLoading(true);
@@ -171,7 +159,6 @@ export default function AdminDashboard({ onLogout }) {
     setLoading(false);
   };
 
-  // Requisitions
   const handleCreateRequisition = async () => {
     if(!reqSubject || !reqFaculty || !reqDeadline || !reqApptNo || !reqTitle) return alert("Please fill all fields to send request.");
     const payload = { department: reqDept, semester: reqSem, subjectCode: reqSubject.toUpperCase(), courseTitle: reqTitle, examType: reqType, facultyId: reqFaculty, deadline: reqDeadline, appointmentLetterNo: reqApptNo, status: "PENDING" };
@@ -182,7 +169,6 @@ export default function AdminDashboard({ onLogout }) {
     }
   };
 
-  // Standard Handlers
   const handleSubjectUpload = (e) => { const file = e.target.files[0]; if (!file) return; const currentDept = deptRef.current; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); return { subjectCode: n.subjectcode || n["subject code"], subjectName: n.subjectname || n["subject name"], department: currentDept, semester: parseInt(sem), l: parseInt(n.l)||0, t: parseInt(n.t)||0, p: parseInt(n.p)||0, credits: parseInt(n.c)||0, paperType: "THEORY" }; }); apiPost("/api/import/subjects", mapped); }); };
   const handleLoginUpload = (e) => { const file = e.target.files[0]; if (!file) return; readFirstSheet(file, (rows) => { const mapped = rows.map((r) => { const n = normalizeRowKeys(r); let rawPassword = ""; for (let k in n) { if (k.includes("dob") || k.includes("birth") || k.includes("pass")) { rawPassword = String(n[k]).trim(); break; } } let formattedPassword = rawPassword; if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(rawPassword)) { const parts = rawPassword.split(/[\/\-]/); formattedPassword = `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`; } else if (/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(rawPassword)) { const parts = rawPassword.split(/[\/\-]/); formattedPassword = `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`; } else if (!isNaN(rawPassword) && Number(rawPassword) > 20000) { const dateObj = new Date((Number(rawPassword) - 25569) * 86400 * 1000); const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0'); const d = String(dateObj.getDate()).padStart(2, '0'); formattedPassword = `${d}-${m}-${y}`; } return { registerNumber: n.registerNumber, name: n.name, password: formattedPassword, department: n.department || "", semester: n.semester ? parseInt(n.semester) : parseInt(sem), role: uploadRole }; }); const validRows = mapped.filter(m => m.registerNumber); if(validRows.length === 0) { setMessage("⚠️ No valid Register Numbers found."); return; } apiPost("/api/import/logins", validRows); }); };
   const fetchSubjects = async (type) => { setPaperType(type); setSubjectList([]); setSelectedSubject(""); setMessage(`Fetching ${type} subjects...`); try { const res = await fetch(`${API_BASE}/api/import/fetch-subjects?department=${dept}&semester=${sem}&paperType=${type}`); if (!res.ok) throw new Error("Failed to fetch subjects"); const data = await res.json(); setSubjectList(data); if (data.length === 0) setMessage(`⚠️ No ${type} subjects found.`); else setMessage(""); } catch (err) { setMessage(`❌ Error: ${err.message}`); } };
@@ -195,20 +181,8 @@ export default function AdminDashboard({ onLogout }) {
   const handleDownload = () => { const ws = XLSX.utils.json_to_sheet(previewData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Draft Results"); XLSX.writeFile(wb, `Results_Draft.xlsx`); };
   const handleUnpublishLive = async (targetSem, targetDept) => { if(!confirm(`🚨 DANGER: Are you sure you want to DROP/UNPUBLISH the LIVE results for ${targetDept} Sem ${targetSem}?`)) return; try { const res = await fetch(`${API_BASE}/api/import/unpublish?semester=${targetSem}&department=${targetDept}`, { method: "DELETE" }); if(res.ok) { setMessage(`✅ Successfully dropped live results for ${targetDept} Semester ${targetSem}.`); } else { const text = await res.text(); setMessage(`❌ Error unpublishing: ${text}`); } } catch(err) { setMessage("❌ Network error dropping live results."); } };
   const handlePromote = async (targetDept, targetSem) => { if(!confirm(`⚠️ PROMOTION: Are you sure you want to promote all ${targetDept} Semester ${targetSem} students to the next stage?`)) return; setLoading(true); try { const res = await fetch(`${API_BASE}/api/import/promote-students?department=${targetDept}&currentSemester=${targetSem}`, { method: "POST" }); const data = await res.json(); if(res.ok) setMessage(`🎉 Success: ${data.message}`); else setMessage(`❌ Error: ${data.error || "Promotion failed"}`); } catch (err) { setMessage("❌ Network error during promotion."); } setLoading(false); };
+  const handleDeletePaper = async (id) => { if (!confirm("⚠️ Are you sure you want to permanently delete this question paper?")) return; setLoading(true); try { const res = await fetch(`${API_BASE}/api/import/question-paper/${id}`, { method: "DELETE" }); const data = await res.json(); if (res.ok) { setMessage(`✅ Success: ${data.message}`); setSavedPapers(prev => prev.filter(paper => paper.id !== id)); } else { setMessage(`❌ Error: ${data.error}`); } } catch (err) { setMessage("❌ Network error during deletion."); } setLoading(false); };
   
-  const handleDeletePaper = async (id) => { 
-    if (!confirm("⚠️ Are you sure you want to permanently delete this question paper?")) return; 
-    setLoading(true); 
-    try { 
-      const res = await fetch(`${API_BASE}/api/import/question-paper/${id}`, { method: "DELETE" }); 
-      const data = await res.json(); 
-      if (res.ok) { setMessage(`✅ Success: ${data.message}`); setSavedPapers(prev => prev.filter(paper => paper.id !== id)); } 
-      else { setMessage(`❌ Error: ${data.error}`); } 
-    } catch (err) { setMessage("❌ Network error during deletion."); } 
-    setLoading(false); 
-  };
-  
-  // OCR & PDF Processing Data
   const handleSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ The AI Scanner requires an Image file (PNG/JPG). Please take a screenshot of your PDF and upload the image!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted text below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear, or try a different file."); setShowOcrModal(false); } setLoading(false); };
   const parseOcrDataToDB = () => { const currentDept = deptRef.current; const currentSem = String(sem); const lines = ocrText.split('\n'); const finalPayload = []; const regex = /(1127\d{8}|[A-Z0-9]{10,14}).*?(\d{1,3})/i; lines.forEach(line => { const match = line.match(regex); if (match) { const regNo = match[1].toUpperCase(); const mark = parseInt(match[2]); if (mark <= 100) { finalPayload.push({ registerNumber: regNo, subjectCode: selectedSubject || "SCANNED", semester: currentSem, grade: mark >= 50 ? "PASS" : "FAIL", result: mark >= 50 ? "PASS" : "FAIL", mark: String(mark), department: currentDept }); } } }); if (finalPayload.length === 0) { alert("⚠️ Could not find valid Register Numbers and Marks in the text."); return; } if(!confirm(`📢 SCANNED UPLOAD:\nFound ${finalPayload.length} valid students.\nClick OK to upload directly to Drafts.`)) return; apiPost("/api/import/results", finalPayload).then((success) => { if(success) { setShowOcrModal(false); setTimeout(() => handlePreview(currentSem, currentDept), 1500); } }); };
   const handleManualSmartScanUpload = async (e) => { const file = e.target.files[0]; if (!file) return; if (file.type === "application/pdf") { alert("⚠️ You uploaded a PDF. Please change the Dropdown above to 'Native PDF' instead of 'AI Smart Scan'!"); return; } setLoading(true); setMessage("🔍 Document AI is scanning your image... This may take a moment."); setShowManualOcrModal(true); try { const result = await Tesseract.recognize(file, 'eng', { logger: m => console.log(m) }); setManualOcrText(result.data.text); setMessage("✅ Smart Scan complete. Please verify the extracted grades below."); } catch (err) { setMessage("❌ OCR Failed. Make sure the image is clear."); setShowManualOcrModal(false); } setLoading(false); };
@@ -293,7 +267,6 @@ export default function AdminDashboard({ onLogout }) {
     setLoading(false);
   };
 
-  // --- NEW: HALL TICKET GENERATOR LOGIC ---
   const handleGenerateHallTickets = async () => {
      if(!htDept || !htSem) return alert("Select Dept and Semester");
      setIsGeneratingHT(true);
@@ -301,7 +274,6 @@ export default function AdminDashboard({ onLogout }) {
      setMessage("🔍 Fetching subjects and student records...");
 
      try {
-         // 1. Fetch all subjects for the targeted semester
          const types = ["THEORY", "PRACTICAL", "INTEGRATED"];
          let currentSemSubjects = [];
          for(let t of types) {
@@ -312,7 +284,6 @@ export default function AdminDashboard({ onLogout }) {
              }
          }
 
-         // 2. Fetch all students to find who is in this dept/sem
          const stdRes = await fetch(`${API_BASE}/api/import/logins`);
          if(!stdRes.ok) throw new Error("Could not fetch students");
          const allStudents = await stdRes.json();
@@ -326,7 +297,6 @@ export default function AdminDashboard({ onLogout }) {
 
          setMessage(`⚙️ Analyzing past arrears for ${targetStudents.length} students...`);
 
-         // 3. For each student, get profile and calculate arrears
          const tickets = [];
          for(let s of targetStudents) {
              let arrears = [];
@@ -369,147 +339,147 @@ export default function AdminDashboard({ onLogout }) {
      return `B.E. ${deptCode}`;
   };
 
+  // Trigger individual print by isolating the ticket
+  const printIndividualTicket = (regNo) => {
+      setPrintSingleId(regNo);
+      setTimeout(() => {
+          window.print();
+          setPrintSingleId(null);
+      }, 500);
+  };
+
+  const ticketsToRender = printSingleId 
+        ? generatedTickets.filter(t => t.student.registerNumber === printSingleId)
+        : generatedTickets;
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-gray-800">
       
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 5mm; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
+
       {/* 🖨️ THE HIDDEN PRINTABLE A4 HALL TICKET AREA */}
-      {generatedTickets.length > 0 && (
+      {ticketsToRender.length > 0 && (
          <div className="hidden print:block print:absolute print:inset-0 print:bg-white print:z-[9999] text-black bg-white w-full">
-            {generatedTickets.map((ticket, index) => {
-               // Combine all subjects for the table
+            {ticketsToRender.map((ticket) => {
                const allDisplaySubjects = [
                   ...ticket.currentSubjects.map(sub => ({ sem: htSem, code: sub.subjectCode, title: sub.subjectName })),
                   ...ticket.arrears.map(arr => ({ sem: arr.semester, code: arr.subjectCode || arr.subject, title: "ARREAR SUBJECT" }))
                ];
                
-               // Split into left and right columns
                const midpoint = Math.ceil(allDisplaySubjects.length / 2);
                const leftCol = allDisplaySubjects.slice(0, midpoint);
                const rightCol = allDisplaySubjects.slice(midpoint);
 
                return (
-                 <div key={ticket.student.registerNumber} className="print:w-[210mm] print:h-[297mm] p-6 mx-auto box-border" style={{ pageBreakAfter: "always" }}>
-                    <div className="border-[3px] border-black p-1 h-full flex flex-col relative">
+                 <div key={ticket.student.registerNumber} className="print:w-[195mm] print:h-[285mm] p-2 mx-auto box-border" style={{ pageBreakAfter: "always" }}>
+                    <div className="border-[3px] border-black p-1 h-full flex flex-col relative overflow-hidden">
                        
-                       {/* Header row */}
-                       <div className="flex border-b-[3px] border-black">
+                       <div className="flex border-b-[3px] border-black h-28 shrink-0">
                           <div className="w-32 flex justify-center items-center p-2 border-r-[3px] border-black">
-                             <div className="w-20 h-20 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-bold text-center">ANNA<br/>UNIV<br/>LOGO</div>
+                             <div className="w-20 h-20 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-bold text-center leading-tight">ANNA<br/>UNIV<br/>LOGO</div>
                           </div>
                           <div className="flex-1 flex flex-col items-center justify-center text-center p-2">
                              <h1 className="text-2xl font-bold uppercase tracking-widest">Anna University</h1>
                              <p className="text-sm font-bold uppercase tracking-wider">Chennai - 600 025</p>
-                             <p className="text-sm font-medium mt-2">UNIVERSITY EXAMINATIONS - {htSession}</p>
+                             <p className="text-sm font-medium mt-1">UNIVERSITY EXAMINATIONS - {htSession}</p>
                              <p className="text-lg font-bold mt-1 tracking-widest">HALL TICKET</p>
                           </div>
-                          
-                          {/* ✅ NEW: DATABASE PHOTO FETCHING */}
                           <div className="w-32 border-l-[3px] border-black flex flex-col items-center justify-center p-2 bg-white">
-                             <div className="w-24 h-28 border border-gray-400 flex items-center justify-center overflow-hidden bg-gray-50 relative">
+                             <div className="w-20 h-24 border border-gray-400 flex items-center justify-center overflow-hidden bg-gray-50 relative">
                                 <img 
                                   src={`${API_BASE}/api/students/${ticket.student.registerNumber}/photo?t=${ticket.student.photoUpdateTs || ''}`} 
                                   alt={ticket.student.registerNumber}
                                   className="w-full h-full object-cover absolute inset-0 z-10"
-                                  onError={(e) => {
-                                     e.target.onerror = null; 
-                                     e.target.style.display = 'none'; 
-                                  }}
+                                  onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
                                 />
-                                <span className="text-[10px] text-gray-400 text-center px-2">Photo Missing</span>
+                                <span className="text-[10px] text-gray-400 text-center px-1">Photo Missing</span>
                              </div>
                           </div>
                        </div>
 
-                       {/* Info Grid */}
-                       <div className="flex border-b-[3px] border-black text-sm">
+                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
                           <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Register Number</div>
                           <div className="flex-1 p-2 font-bold border-r-[3px] border-black flex items-center tracking-widest">{ticket.student.registerNumber}</div>
                           <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">Current Semester</div>
                           <div className="w-16 p-2 font-bold flex items-center justify-center">{String(htSem).padStart(2, '0')}</div>
                        </div>
 
-                       <div className="flex border-b-[3px] border-black text-sm">
+                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
                           <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Name</div>
                           <div className="flex-1 p-2 font-bold uppercase border-r-[3px] border-black flex items-center">{ticket.student.name}</div>
                           <div className="w-[150px] p-2 font-bold border-r border-black flex items-center">D.O.B</div>
-                          <div className="w-32 p-2 font-bold flex items-center whitespace-nowrap">
-                             {ticket.student.password && ticket.student.password.includes("-") ? ticket.student.password : "-"}
-                          </div>
+                          <div className="w-32 p-2 font-bold flex items-center whitespace-nowrap">{ticket.student.password && ticket.student.password.includes("-") ? ticket.student.password : "-"}</div>
                        </div>
 
-                       <div className="flex border-b-[3px] border-black text-sm">
+                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
                           <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Degree & Branch</div>
                           <div className="flex-1 p-2 font-bold uppercase flex items-center">{getBranchName(htDept)}</div>
                        </div>
 
-                       <div className="flex border-b-[3px] border-black text-sm">
+                       <div className="flex border-b-[3px] border-black text-sm shrink-0">
                           <div className="w-[180px] p-2 font-bold border-r border-black flex items-center">Examination Centre</div>
                           <div className="flex-1 p-2 font-bold uppercase flex items-center">{htCentre}</div>
                        </div>
 
-                       {/* Subjects Table Area */}
-                       <div className="flex flex-1 border-b-[3px] border-black">
-                          {/* Left Column */}
-                          <div className="flex-1 border-r-[3px] border-black flex flex-col">
-                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1">
+                       {/* Subjects split correctly */}
+                       <div className="flex flex-1 border-b-[3px] border-black overflow-hidden">
+                          <div className="flex-1 border-r-[3px] border-black flex flex-col h-full">
+                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1 shrink-0">
                                 <div className="w-10 text-center">Sem</div>
                                 <div className="w-20 text-center">Sub Code</div>
                                 <div className="flex-1 pl-2">Subject Title</div>
                              </div>
-                             <div className="p-2 space-y-3">
+                             <div className="p-2 space-y-2 overflow-hidden">
                                 {leftCol.map((sub, i) => (
                                    <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
                                       <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
                                       <div className="w-20 text-center">{sub.code}</div>
-                                      <div className="flex-1 pl-2">{sub.title}</div>
+                                      <div className="flex-1 pl-2 truncate">{sub.title}</div>
                                    </div>
                                 ))}
                              </div>
-                             <div className="mt-auto p-4 font-bold text-sm">
+                             <div className="mt-auto p-4 font-bold text-sm bg-white shrink-0">
                                 No of Subjects Registered: {allDisplaySubjects.length}
                              </div>
                           </div>
                           
-                          {/* Right Column */}
-                          <div className="flex-1 flex flex-col">
-                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1">
+                          <div className="flex-1 flex flex-col h-full">
+                             <div className="flex border-b border-black bg-gray-100 text-xs font-bold font-serif p-1 shrink-0">
                                 <div className="w-10 text-center">Sem</div>
                                 <div className="w-20 text-center">Sub Code</div>
                                 <div className="flex-1 pl-2">Subject Title</div>
                              </div>
-                             <div className="p-2 space-y-3">
+                             <div className="p-2 space-y-2 overflow-hidden">
                                 {rightCol.map((sub, i) => (
                                    <div key={i} className="flex text-[11px] font-mono font-bold uppercase">
                                       <div className="w-10 text-center">{String(sub.sem).padStart(2, '0')}</div>
                                       <div className="w-20 text-center">{sub.code}</div>
-                                      <div className="flex-1 pl-2">{sub.title}</div>
+                                      <div className="flex-1 pl-2 truncate">{sub.title}</div>
                                    </div>
                                 ))}
                              </div>
                           </div>
                        </div>
 
-                       {/* Footer / Notes */}
-                       <div className="p-2 text-[10px] flex-1">
+                       <div className="p-2 text-[10px] h-20 shrink-0 bg-white">
                           <p className="font-bold mb-1">NOTE :</p>
                           <div className="whitespace-pre-line leading-tight ml-4 pl-4" style={{textIndent: "-1rem"}}>{htNotes}</div>
                        </div>
 
-                       {/* Signatures */}
-                       <div className="flex border-t-[3px] border-black h-24 relative">
+                       <div className="flex border-t-[3px] border-black h-20 shrink-0 relative bg-white">
                           <div className="absolute top-2 left-2 text-[10px] font-bold">Generated on: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-                          
-                          <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500">
-                             Signature of the Candidate
-                          </div>
+                          <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500">Signature of the Candidate</div>
                           <div className="flex-1 border-r-[3px] border-black flex items-end justify-center pb-2 text-xs text-gray-500 relative">
-                             {/* Placeholder seal */}
-                             <div className="absolute top-2 right-2 w-12 h-12 rounded-full border border-gray-400 flex items-center justify-center text-[6px] text-center text-gray-400 opacity-50 transform -rotate-12">SEAL</div>
+                             <div className="absolute top-1 right-2 w-12 h-12 rounded-full border border-gray-400 flex items-center justify-center text-[6px] text-center text-gray-400 opacity-50 transform -rotate-12">SEAL</div>
                              Signature of the Principal with seal
                           </div>
                           <div className="flex-1 flex items-end justify-center pb-2 text-xs text-gray-500 relative">
-                             {/* Fake signature */}
-                             <div className="absolute bottom-8 right-10 text-black font-serif text-2xl opacity-80 transform -rotate-6">Controller</div>
+                             <div className="absolute bottom-6 right-10 text-black font-serif text-2xl opacity-80 transform -rotate-6">Controller</div>
                              Controller of Examinations
                           </div>
                        </div>
@@ -539,29 +509,37 @@ export default function AdminDashboard({ onLogout }) {
           <button onClick={() => setActiveTab("halltickets")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "halltickets" ? "border-b-2 border-pink-600 text-pink-700" : "text-gray-500 hover:text-pink-700"}`}>8. Hall Tickets</button>
           <button onClick={() => setActiveTab("gpa")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "gpa" ? "border-b-2 border-indigo-600 text-indigo-700" : "text-gray-500 hover:text-indigo-700"}`}>9. GPA Calc</button>
           <button onClick={() => setActiveTab("settings")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "settings" ? "border-b-2 border-gray-800 text-gray-800" : "text-gray-500 hover:text-gray-800"}`}>10. Settings</button>
-          
-          {/* NEW: PROFILES TAB */}
           <button onClick={() => setActiveTab("profiles")} className={`pb-2 px-4 font-bold transition-colors ${activeTab === "profiles" ? "border-b-2 border-blue-600 text-blue-700" : "text-gray-500 hover:text-blue-700"}`}>11. Profiles</button>
         </div>
 
         <AnimatePresence>{message && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`p-4 rounded-md mb-6 text-sm font-medium shadow-sm ${message.startsWith("✅") || message.startsWith("🎉") ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>{message}</motion.div>}</AnimatePresence>
         
-        {/* NEW: PROFILES VIEW */}
+        {/* PROFILES VIEW */}
         {activeTab === "profiles" && (
            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                 <div className="flex justify-between items-center mb-6">
+                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                     <div>
                        <h2 className="text-xl font-bold text-gray-800">Student Profiles & Photos</h2>
                        <p className="text-sm text-gray-500">Upload profile pictures for Hall Tickets. Images are saved directly to the database.</p>
                     </div>
-                    <input 
-                      type="text" 
-                      placeholder="Search Register No..." 
-                      value={profileSearch}
-                      onChange={e => setProfileSearch(e.target.value)}
-                      className="p-2 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                       <select value={profileDeptFilter} onChange={e => setProfileDeptFilter(e.target.value)} className="p-2 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-gray-600">
+                          <option value="All">All Depts</option>
+                          {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                       </select>
+                       <select value={profileSemFilter} onChange={e => setProfileSemFilter(e.target.value)} className="p-2 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-gray-600">
+                          <option value="All">All Sems</option>
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 99].map(n => <option key={n} value={n}>{n === 99 ? 'Graduated' : `Sem ${n}`}</option>)}
+                       </select>
+                       <input 
+                         type="text" 
+                         placeholder="Search Reg No or Name..." 
+                         value={profileSearch}
+                         onChange={e => setProfileSearch(e.target.value)}
+                         className="p-2 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-blue-500 flex-1 md:w-48"
+                       />
+                    </div>
                  </div>
 
                  <div className="overflow-x-auto rounded-lg border border-gray-200">
@@ -577,43 +555,66 @@ export default function AdminDashboard({ onLogout }) {
                           </tr>
                        </thead>
                        <tbody className="divide-y divide-gray-100">
-                          {profileStudents
-                             .filter(s => s.registerNumber.includes(profileSearch.toUpperCase()))
-                             .map(student => (
-                             <tr key={student.registerNumber} className="hover:bg-gray-50 items-center">
-                                <td className="px-4 py-2 flex justify-center">
-                                   <div className="w-12 h-14 bg-gray-200 border border-gray-300 rounded overflow-hidden relative flex items-center justify-center">
-                                      <img 
-                                        src={`${API_BASE}/api/students/${student.registerNumber}/photo?t=${student.photoUpdateTs || ''}`}
-                                        alt="profile"
-                                        className="w-full h-full object-cover absolute inset-0 z-10"
-                                        onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
-                                      />
-                                      <span className="text-[8px] text-gray-400">None</span>
-                                   </div>
-                                </td>
-                                <td className="px-4 py-3 font-mono font-bold text-gray-800">{student.registerNumber}</td>
-                                <td className="px-4 py-3 text-gray-700">{student.name}</td>
-                                <td className="px-4 py-3 text-gray-600">{student.department}</td>
-                                <td className="px-4 py-3 text-gray-600">{student.semester}</td>
-                                <td className="px-4 py-3">
-                                   <label className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-bold py-1.5 px-3 rounded text-xs cursor-pointer inline-block transition-colors">
-                                      Upload Photo
-                                      <input 
-                                         type="file" 
-                                         accept="image/*" 
-                                         className="hidden" 
-                                         onChange={(e) => handlePhotoUpload(student.registerNumber, e)}
-                                      />
-                                   </label>
-                                </td>
-                             </tr>
-                          ))}
+                          {(() => {
+                             const filtered = profileStudents
+                                .filter(s => profileDeptFilter === "All" || s.department === profileDeptFilter)
+                                .filter(s => profileSemFilter === "All" || String(s.semester) === String(profileSemFilter))
+                                .filter(s => s.registerNumber.toUpperCase().includes(profileSearch.toUpperCase()) || (s.name && s.name.toUpperCase().includes(profileSearch.toUpperCase())));
+
+                             if (filtered.length === 0) return <tr><td colSpan="6" className="p-8 text-center text-gray-500">No students found matching your filters.</td></tr>;
+
+                             // Group by Semester
+                             const grouped = filtered.reduce((acc, s) => {
+                                const sm = s.semester || "Unknown";
+                                if(!acc[sm]) acc[sm] = [];
+                                acc[sm].push(s);
+                                return acc;
+                             }, {});
+
+                             const sortedSems = Object.keys(grouped).sort((a,b) => Number(b) - Number(a));
+
+                             return sortedSems.map(sem => (
+                                <React.Fragment key={`sem-${sem}`}>
+                                   <tr className="bg-blue-50/80 border-y border-blue-100">
+                                      <td colSpan="6" className="px-6 py-2 font-bold text-blue-800 text-sm uppercase tracking-wider">
+                                         Semester {sem}
+                                      </td>
+                                   </tr>
+                                   {grouped[sem].map(student => (
+                                     <tr key={student.registerNumber} className="hover:bg-gray-50 items-center">
+                                        <td className="px-4 py-2 flex justify-center">
+                                           <div className="w-12 h-14 bg-gray-200 border border-gray-300 rounded overflow-hidden relative flex items-center justify-center">
+                                              <img 
+                                                src={`${API_BASE}/api/students/${student.registerNumber}/photo?t=${student.photoUpdateTs || ''}`}
+                                                alt="profile"
+                                                className="w-full h-full object-cover absolute inset-0 z-10"
+                                                onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                                              />
+                                              <span className="text-[8px] text-gray-400">None</span>
+                                           </div>
+                                        </td>
+                                        <td className="px-4 py-3 font-mono font-bold text-gray-800">{student.registerNumber}</td>
+                                        <td className="px-4 py-3 text-gray-700">{student.name}</td>
+                                        <td className="px-4 py-3 text-gray-600">{student.department}</td>
+                                        <td className="px-4 py-3 text-gray-600">{student.semester}</td>
+                                        <td className="px-4 py-3">
+                                           <label className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-bold py-1.5 px-3 rounded text-xs cursor-pointer inline-block transition-colors">
+                                              Upload Photo
+                                              <input 
+                                                 type="file" 
+                                                 accept="image/*" 
+                                                 className="hidden" 
+                                                 onChange={(e) => handlePhotoUpload(student.registerNumber, e)}
+                                              />
+                                           </label>
+                                        </td>
+                                     </tr>
+                                   ))}
+                                </React.Fragment>
+                             ));
+                          })()}
                        </tbody>
                     </table>
-                    {profileStudents.length === 0 && (
-                       <div className="p-8 text-center text-gray-500">No students found. Go to Setup tab and upload logins first.</div>
-                    )}
                  </div>
               </div>
            </motion.div>
@@ -636,7 +637,6 @@ export default function AdminDashboard({ onLogout }) {
                  </button>
               </div>
 
-              {/* Template Builder Settings */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
                  <h3 className="font-bold text-gray-700 mb-4 border-b pb-2">Template Builder Settings</h3>
                  <div className="space-y-4">
@@ -646,17 +646,30 @@ export default function AdminDashboard({ onLogout }) {
                  </div>
               </div>
 
-              {/* Preview Table */}
+              {/* NEW PREVIEW TABLE WITH ALL DOWNLOAD OPTIONS */}
               {generatedTickets.length > 0 && (
                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
                        <h3 className="font-bold text-gray-700">Preview: {generatedTickets.length} Students</h3>
-                       <button onClick={() => window.print()} className="bg-gray-800 text-white font-bold py-2 px-4 rounded shadow-sm hover:bg-gray-900 transition-colors">🖨️ Print All to PDF</button>
+                       <div className="flex gap-2">
+                          <button onClick={() => exportHallTicketsDocx(generatedTickets, { session: htSession, centre: htCentre, notes: htNotes, sem: htSem }, htDept)} className="bg-blue-600 text-white font-bold py-2 px-4 rounded shadow-sm hover:bg-blue-700 transition-colors">
+                             📄 Download All (DOCX)
+                          </button>
+                          <button onClick={() => window.print()} className="bg-gray-800 text-white font-bold py-2 px-4 rounded shadow-sm hover:bg-gray-900 transition-colors">
+                             🖨️ Print All to PDF
+                          </button>
+                       </div>
                     </div>
-                    <div className="max-h-[400px] overflow-y-auto">
+                    <div className="max-h-[500px] overflow-y-auto">
                        <table className="w-full text-sm text-left">
-                          <thead className="bg-gray-100 text-gray-600 uppercase text-xs font-bold sticky top-0">
-                             <tr><th className="px-4 py-3">Register No</th><th className="px-4 py-3">Name</th><th className="px-4 py-3 text-center">Current Subjects</th><th className="px-4 py-3 text-center">Arrears Found</th></tr>
+                          <thead className="bg-gray-100 text-gray-600 uppercase text-xs font-bold sticky top-0 z-10">
+                             <tr>
+                                <th className="px-4 py-3">Register No</th>
+                                <th className="px-4 py-3">Name</th>
+                                <th className="px-4 py-3 text-center">Subjects</th>
+                                <th className="px-4 py-3 text-center">Arrears</th>
+                                <th className="px-4 py-3 text-center">Actions</th>
+                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                              {generatedTickets.map((t, i) => (
@@ -666,6 +679,16 @@ export default function AdminDashboard({ onLogout }) {
                                    <td className="px-4 py-3 text-center font-bold text-blue-600">{t.currentSubjects.length}</td>
                                    <td className="px-4 py-3 text-center">
                                       <span className={`px-2 py-1 rounded text-xs font-bold ${t.arrears.length > 0 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{t.arrears.length}</span>
+                                   </td>
+                                   <td className="px-4 py-3 flex justify-center gap-2">
+                                      <button 
+                                         onClick={() => printIndividualTicket(t.student.registerNumber)}
+                                         className="bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300 font-bold py-1 px-3 rounded text-xs transition-colors"
+                                      >Print</button>
+                                      <button 
+                                         onClick={() => exportHallTicketsDocx([t], { session: htSession, centre: htCentre, notes: htNotes, sem: htSem }, htDept)}
+                                         className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 font-bold py-1 px-3 rounded text-xs transition-colors"
+                                      >Docx</button>
                                    </td>
                                 </tr>
                              ))}
@@ -677,7 +700,7 @@ export default function AdminDashboard({ onLogout }) {
            </motion.div>
         )}
 
-        {/* SETTINGS VIEW */}
+        {/* SETTINGS, GPA, SETUP, EXCEL, GRID, PROCESS, MANUAL, MANAGE, QPAPERS ... */}
         {activeTab === "settings" && (
            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 max-w-md">
@@ -695,10 +718,8 @@ export default function AdminDashboard({ onLogout }) {
            </motion.div>
         )}
 
-        {/* GPA VIEW */}
         {activeTab === "gpa" && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}><div className="max-w-4xl mx-auto"><GPACalculator /></div></motion.div>)}
         
-        {/* Other Tabs (Setup, Excel, Grid, Process, Manual, Manage) */}
         {activeTab === "setup" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6"> 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex gap-4 items-end">
@@ -1013,79 +1034,6 @@ export default function AdminDashboard({ onLogout }) {
             )}
 
           </motion.div>
-        )}
-
-        {/* NEW: PROFILES TAB */}
-        {activeTab === "profiles" && (
-           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                 <div className="flex justify-between items-center mb-6">
-                    <div>
-                       <h2 className="text-xl font-bold text-gray-800">Student Profiles & Photos</h2>
-                       <p className="text-sm text-gray-500">Upload profile pictures for Hall Tickets. Images are saved directly to the database.</p>
-                    </div>
-                    <input 
-                      type="text" 
-                      placeholder="Search Register No..." 
-                      value={profileSearch}
-                      onChange={e => setProfileSearch(e.target.value)}
-                      className="p-2 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                 </div>
-
-                 <div className="overflow-x-auto rounded-lg border border-gray-200">
-                    <table className="w-full text-sm text-left">
-                       <thead className="bg-gray-100 text-gray-600 uppercase text-xs font-bold">
-                          <tr>
-                             <th className="px-4 py-3 w-20 text-center">Photo</th>
-                             <th className="px-4 py-3">Register No</th>
-                             <th className="px-4 py-3">Name</th>
-                             <th className="px-4 py-3">Dept</th>
-                             <th className="px-4 py-3">Sem</th>
-                             <th className="px-4 py-3 w-48">Action</th>
-                          </tr>
-                       </thead>
-                       <tbody className="divide-y divide-gray-100">
-                          {profileStudents
-                             .filter(s => s.registerNumber.includes(profileSearch.toUpperCase()))
-                             .map(student => (
-                             <tr key={student.registerNumber} className="hover:bg-gray-50 items-center">
-                                <td className="px-4 py-2 flex justify-center">
-                                   <div className="w-12 h-14 bg-gray-200 border border-gray-300 rounded overflow-hidden relative flex items-center justify-center">
-                                      <img 
-                                        src={`${API_BASE}/api/students/${student.registerNumber}/photo?t=${student.photoUpdateTs || ''}`}
-                                        alt="profile"
-                                        className="w-full h-full object-cover absolute inset-0 z-10"
-                                        onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
-                                      />
-                                      <span className="text-[8px] text-gray-400">None</span>
-                                   </div>
-                                </td>
-                                <td className="px-4 py-3 font-mono font-bold text-gray-800">{student.registerNumber}</td>
-                                <td className="px-4 py-3 text-gray-700">{student.name}</td>
-                                <td className="px-4 py-3 text-gray-600">{student.department}</td>
-                                <td className="px-4 py-3 text-gray-600">{student.semester}</td>
-                                <td className="px-4 py-3">
-                                   <label className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-bold py-1.5 px-3 rounded text-xs cursor-pointer inline-block transition-colors">
-                                      Upload Photo
-                                      <input 
-                                         type="file" 
-                                         accept="image/*" 
-                                         className="hidden" 
-                                         onChange={(e) => handlePhotoUpload(student.registerNumber, e)}
-                                      />
-                                   </label>
-                                </td>
-                             </tr>
-                          ))}
-                       </tbody>
-                    </table>
-                    {profileStudents.length === 0 && (
-                       <div className="p-8 text-center text-gray-500">No students found. Go to Setup tab and upload logins first.</div>
-                    )}
-                 </div>
-              </div>
-           </motion.div>
         )}
 
       </main>

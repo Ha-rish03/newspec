@@ -98,7 +98,7 @@ export default function Login({ onLogin }) {
           <span className="uppercase tracking-widest text-slate-500 font-bold">Engineered By</span>
           <span className="font-bold text-indigo-400 tracking-wider cursor-default hover:text-indigo-300 transition-colors">HARISH KUMAR G U</span> 
           <span className="text-slate-600">|</span> 
-          <span className="font-bold text-indigo-400 tracking-wider cursor-default hover:text-indigo-300 transition-colors">RAGAVA JAYASREE</span>
+          <span className="font-bold text-indigo-400 tracking-wider cursor-default hover:text-indigo-300 transition-colors">RAGAVA JAYASREE S</span>
         </div>
       </div>
       {/* 🛑 END OF ATTRIBUTION 🛑 */}

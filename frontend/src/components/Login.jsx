@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { API_BASE } from "../utils";
 
@@ -6,6 +6,15 @@ export default function Login({ onLogin }) {
   const [tab, setTab] = useState("student");
   const [regNo, setRegNo] = useState(""); 
   const [password, setPassword] = useState("");
+
+  // 🛑 CORE ATTRIBUTION - DO NOT REMOVE
+  useEffect(() => {
+    console.log(
+      "%c AURA: Automated University Results & Assessment System \n%c System Engineered & Developed by Harish kumar G U & Ragava Jayasree \n © " + new Date().getFullYear() + " St. Peter's College of Engineering and Technology ",
+      "font-size: 16px; font-weight: bold; color: #4f46e5; padding: 5px 0;",
+      "font-size: 12px; color: #10b981; font-weight: bold; padding-bottom: 5px;"
+    );
+  }, []);
 
   const handleLogin = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -47,7 +56,7 @@ export default function Login({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-cover bg-center relative" style={{ backgroundImage: "url('/college-bg.jpg')" }}>
+    <div className="min-h-screen flex items-center justify-center bg-cover bg-center relative pb-24" style={{ backgroundImage: "url('/college-bg.jpg')" }}>
       <div className="absolute inset-0 bg-black/40" />
       <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="relative z-10 w-[480px] p-6 glacier-card bg-white/90 backdrop-blur-sm rounded-xl shadow-2xl">
         <div className="flex items-end gap-6 mb-4"><div className="text-slate-800 text-lg font-semibold">SPCET Portal</div><div className="flex-1 border-b border-slate-400/40" /></div>
@@ -73,6 +82,27 @@ export default function Login({ onLogin }) {
           </div>
         </div>
       </motion.div>
+
+      {/* =========================================================================
+          🛑 CORE COPYRIGHT & ATTRIBUTION - DO NOT MODIFY OR REMOVE 🛑
+          System explicitly designed and developed by Harish kumar G U and Ragava Jayasree.
+          ========================================================================= */}
+      <div className="absolute bottom-0 w-full bg-slate-900 text-slate-400 py-4 text-center text-[11px] border-t-2 border-indigo-600 z-50">
+        <p className="font-bold text-slate-200 tracking-widest uppercase mb-1 text-xs">
+          © {new Date().getFullYear()} St. Peter's College of Engineering and Technology
+        </p>
+        <p className="tracking-widest uppercase mb-2 font-semibold">
+          AURA: Automated University Results & Assessment System
+        </p>
+        <div className="flex items-center justify-center gap-3 opacity-90">
+          <span className="uppercase tracking-widest text-slate-500 font-bold">Engineered By</span>
+          <span className="font-bold text-indigo-400 tracking-wider cursor-default hover:text-indigo-300 transition-colors">HARISH KUMAR G U</span> 
+          <span className="text-slate-600">|</span> 
+          <span className="font-bold text-indigo-400 tracking-wider cursor-default hover:text-indigo-300 transition-colors">RAGAVA JAYASREE</span>
+        </div>
+      </div>
+      {/* 🛑 END OF ATTRIBUTION 🛑 */}
+
     </div>
   );
 }

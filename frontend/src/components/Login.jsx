@@ -10,7 +10,7 @@ export default function Login({ onLogin }) {
   // 🛑 CORE ATTRIBUTION - DO NOT REMOVE
   useEffect(() => {
     console.log(
-      "%c AURA: Automated University Results & Assessment System \n%c System Engineered & Developed by Harish kumar G U & Ragava Jayasree \n © " + new Date().getFullYear() + " St. Peter's College of Engineering and Technology ",
+      "%c AURA: Automated University Results & Assessment System \n%c System Engineered & Developed by Harish kumar G U & Ragava Jayasree S\n © " + new Date().getFullYear() + " St. Peter's College of Engineering and Technology ",
       "font-size: 16px; font-weight: bold; color: #4f46e5; padding: 5px 0;",
       "font-size: 12px; color: #10b981; font-weight: bold; padding-bottom: 5px;"
     );
